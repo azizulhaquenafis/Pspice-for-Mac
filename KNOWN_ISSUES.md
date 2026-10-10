@@ -1,0 +1,26 @@
+# Known issues / limitations
+- Requires native ngspice + the Vite dev server (`npm run dev`); no pure-browser (WASM) engine yet.
+- AC analysis: device currents of R/C/L/D are not available (ngspice-47 savecurrents bug); voltages and V-source currents are.
+- IC= handling in .cir decks applies to top-level C/L lines only (not inside .SUBCKT).
+- Current marker on a pin shared by two parts picks the first part found there.
+- Bias labels can be hidden under markers.
+- Results may differ numerically from PSpice (different simulator); PSpice-specific syntax is not translated yet.
+- Visual colours/fonts are from memory of PSpice 9.1, not yet verified against screenshots (please send some).
+- Moving a part whose pin sits mid-wire (not at a wire end) does not drag that wire.
+- F11/F12 on Mac keyboards need fn; Cmd+W/Cmd+N cannot be intercepted by browsers — use Ctrl.
+- Recovery prompt uses a native confirm() dialog.
+- Wire hit-testing at very low zoom may select a wire instead of a nearby part.
+- Bias-point value boxes can overlap net-alias text (no label collision avoidance yet).
+- Switched-RL reference example topology is assumed (the course schematic was not provided) — docs/REFERENCE_CIRCUITS.md.
+- Toolbar wraps to two rows when the window is narrower than ~1000 px.
+- Colours were sampled from low-resolution JPEG screenshots; exact PSpice RGB values unverified.
+- BJT, MOSFET, op-amp and transformer symbols still missing from the part library.
+- Parametric sweeps over model parameters, nested parametric + DC sweep, Monte Carlo not implemented.
+- Netlist Mode cannot read .LIB/.INC files (no file system access from the browser); paste models instead.
+- Probe is one pane (no multiple plot windows / y-axes); no Watch/Devices tabs.
+- A new PARAMETERS block starts empty; two blocks defining the same name are an ERC error.
+- With UIC, ngspice output starts at the first timestep (e.g. 10 ns), not t = 0; the Probe axis still starts at 0 s.
+- Netlist-mode Sw_tOpen/Sw_tClose expansion supports the PARAMS tOpen/tClose, ttran, Rclosed, Ropen only.
+- Probe still lacks Fourier (FFT), multiple plot windows / y-axes, .dat save/load and Performance Analysis.
+- Trace styles, marks and selections are per session (not saved in the project yet).
+- E/F/G/H parts saved with 0.4.1–0.4.2 had output pins at x = 60; they are now at x = 40 again — reconnect those output wires.
