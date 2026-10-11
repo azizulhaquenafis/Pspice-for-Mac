@@ -416,3 +416,18 @@ export function PartInfoDialog({ partId }: { partId: string }) {
     </Dialog>
   );
 }
+
+export function ImportReportDialog() {
+  const r = useStore(s => s.importReport);
+  if (!r) return null;
+  return (
+    <Dialog title={`Import — ${r.file}`} onClose={close} width={560} buttons={<button className="default" onClick={close}>OK</button>}>
+      <ul className="diags">
+        {r.notes.map((n, i) => <li key={'n' + i}>{n}</li>)}
+        {r.warnings.map((w, i) => <li key={'w' + i} className="warning">{w}</li>)}
+      </ul>
+      <div className="muted">Check the circuit, then Analysis ▸ Simulate (F11). Save it as an OpenSpice project with File ▸ Save.
+        PSpice symbol libraries are not available, so OpenSpice symbols are aligned to the imported wires.</div>
+    </Dialog>
+  );
+}

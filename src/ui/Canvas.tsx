@@ -48,7 +48,7 @@ export function Canvas() {
   const highlightNet = useStore(s => s.highlightNet);
   const svgRef = useRef<SVGSVGElement>(null);
   const [cursor, setCursor] = useState<Pt>({ x: 0, y: 0 });
-  const [hint, setHint] = useState<SnapResult | null>(null);
+  const [raw, setRaw] = useState<Pt | null>(null); // unsnapped mouse position (world units)
   const [wirePts, setWirePts] = useState<Pt[] | null>(null);
   const [hFirst, setHFirst] = useState(true);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -66,7 +66,7 @@ export function Canvas() {
       return false;
     };
   }, [wirePts, vdFirst]);
-  useEffect(() => { if (tool.kind !== 'wire') setWirePts(null); if (tool.kind !== 'marker') setVdFirst(null); setHint(null); }, [tool]);
+  useEffect(() => { if (tool.kind !== 'wire') setWirePts(null); if (tool.kind !== 'marker') setVdFirst(null); }, [tool]);
 
   const toWorld = (e: { clientX: number; clientY: number }): Pt => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -196,10 +196,9 @@ export function Canvas() {
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
-    const raw = toWorld(e);
-    const h = snapFor(raw);
-    if (h?.p.x !== hint?.p.x || h?.p.y !== hint?.p.y || h?.kind !== hint?.kind) setHint(h);
-    const p = h?.p ?? snapped(e);
+    const w = toWorld(e);
+    setRaw(w);
+    const p = snapFor(w)?.p ?? snapped(e);
     if (p.x !== cursor.x || p.y !== cursor.y) { setCursor(p); useStore.setState({ cursor: p }); }
     if (wirePts) {
       const last = wirePts[wirePts.length - 1];
@@ -292,6 +291,7 @@ export function Canvas() {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  const hint = raw ? snapFor(raw) : null;
   const moveOff = drag?.kind === 'move' ? { x: drag.cur.x - drag.start.x, y: drag.cur.y - drag.start.y } : null;
   const hlWires = highlightNet ? new Set(conn.nets.find(n => n.name === highlightNet)?.wireIds ?? []) : null;
 

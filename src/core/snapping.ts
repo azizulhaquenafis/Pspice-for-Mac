@@ -16,12 +16,12 @@ export interface SnapOptions {
   pinFilter?: (def: PartDef) => boolean;
 }
 
-const PREFER = 0.4; // pins/ends/crossings win unless a wire point is clearly closer (fraction of reach)
+const PREFER = 0.6; // pins/ends/crossings win unless a wire point is clearly closer (fraction of reach)
 
 export function snapToConnection(doc: SchematicDoc, w: Pt, reach: number, opts: SnapOptions): SnapResult | null {
   let best: SnapResult | null = null, bestScore = Infinity;
-  const consider = (r: SnapResult, preferred: boolean) => {
-    const d = Math.hypot(r.p.x - w.x, r.p.y - w.y);
+  const consider = (r: SnapResult, preferred: boolean, dist?: number) => {
+    const d = dist ?? Math.hypot(r.p.x - w.x, r.p.y - w.y);
     if (d > reach) return;
     const score = d - (preferred ? reach * PREFER : 0);
     if (score < bestScore) { bestScore = score; best = r; }
@@ -38,7 +38,11 @@ export function snapToConnection(doc: SchematicDoc, w: Pt, reach: number, opts: 
     const lo = horiz ? Math.min(wi.a.x, wi.b.x) : Math.min(wi.a.y, wi.b.y);
     const hi = horiz ? Math.max(wi.a.x, wi.b.x) : Math.max(wi.a.y, wi.b.y);
     const along = Math.min(hi, Math.max(lo, snap(horiz ? w.x : w.y)));
-    consider({ p: horiz ? { x: along, y: wi.a.y } : { x: wi.a.x, y: along }, kind: 'wire' }, false);
+    // reach is measured to the wire itself (pointing at a wire always snaps); the placed point is the
+    // nearest grid point along it
+    const c = Math.min(hi, Math.max(lo, horiz ? w.x : w.y));
+    const dWire = horiz ? Math.hypot(w.x - c, w.y - wi.a.y) : Math.hypot(w.x - wi.a.x, w.y - c);
+    consider({ p: horiz ? { x: along, y: wi.a.y } : { x: wi.a.x, y: along }, kind: 'wire' }, false, dWire);
   }
   if (opts.crossings) {
     const hs = doc.wires.filter(x => x.a.y === x.b.y), vs = doc.wires.filter(x => x.a.x === x.b.x);

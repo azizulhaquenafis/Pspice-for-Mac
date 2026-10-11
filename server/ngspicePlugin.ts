@@ -7,6 +7,10 @@ export function ngspicePlugin(): Plugin {
   return {
     name: 'ngspice-local-service',
     configureServer(server) {
+      server.middlewares.use('/api/health', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: true, engine: 'native ngspice' }));
+      });
       server.middlewares.use('/api/simulate', (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; return res.end(); }
         let body = '';
@@ -20,7 +24,7 @@ export function ngspicePlugin(): Plugin {
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(out));
           } catch (e) {
-            res.statusCode = 400; res.end(JSON.stringify({ ok: false, errors: [(e as Error).message] }));
+            res.statusCode = 400; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, errors: [(e as Error).message] }));
           }
         });
       });

@@ -1,4 +1,28 @@
 # Changelog
+## 0.5.1 — 2026-10-11
+- New: File ▸ Import PSpice Schematic (.sch) (also accepted by File ▸ Open). Reads MicroSim/PSpice Schematics
+  8–9.1 text files: parts and ports with attributes (REFDES, VALUE, DC, source/switch/gain/IC parameters),
+  wires, wire labels, junctions, and the Transient / DC Sweep / AC Sweep setup. Each part is turned so its pins
+  meet the imported wires; remaining misaligned pins get a short wire; an import report lists every adjustment,
+  unsupported part (e.g. transistors, op-amps) and setting that could not be read.
+## 0.5.0 — 2026-10-11 (works on Vercel / any static host)
+- Fix: production deployments showed "Simulation service unreachable: Unexpected token '<'". The native
+  /api/simulate service only exists in the Vite dev server. Production now runs **ngspice compiled to
+  WebAssembly** (npm eecircuit-engine 1.8.0, MIT) in a Web Worker inside the visitor's browser — no server.
+- Automatic backend choice: native local service when present (npm run dev with ngspice installed), otherwise
+  WebAssembly; ?engine=wasm|native forces one. Falls back to WebAssembly if the native service disappears.
+- Clear errors: HTML/empty/non-JSON replies from a missing service are reported as such, never as JSON parse errors.
+- WebAssembly specifics handled: one pass per analysis (engine returns one plot), ASCII-only decks (non-ASCII hangs
+  the WASM build), per-pass log reset (rolling 2 MB log), fresh instance after a timeout, 120 s cap, cancel = kill worker.
+- The whole test suite runs on both backends: npm test (native) and npm run test:wasm (WebAssembly).
+- vercel.json: Vite framework, dist output, immutable caching of hashed assets.
+## 0.4.4 — 2026-10-11
+- One snapping rule (src/core/snapping.ts) for the wire, net-alias, junction and marker tools, used for both the
+  live preview and the click, so the preview always shows exactly where the click lands. Reach is 14 screen pixels
+  at every zoom, measured to the wire itself; pins, wire ends and crossings are preferred when in reach.
+- Wire tool: a click near a pin or wire connects to it (and finishes the wire); junction tool snaps to crossings.
+- Selection hit areas use screen pixels at every zoom. Markers and aliases on a moved wire move with it;
+  a voltage marker that no longer sits on a net is drawn grey.
 ## 0.4.3 — 2026-10-11
 - New BUBBLE part (Part Browser, left toolbar): a named connector; every BUBBLE / net alias with the same LABEL
   is one net ("0" = ground), so circuits can be connected without wires. Unlabelled or unattached bubbles are reported.

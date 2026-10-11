@@ -60,5 +60,6 @@
 | Files | Save/Save As/Open .osch (File System Access API in Chrome; download fallback) | ✅ (Test I) |
 | Files | Autosave to browser storage + recovery prompt | 🟡 |
 | Files | Print (browser print of schematic) | 🟡 |
-| Files | PSpice .sch / OrCAD import, SPICE deck import | ⛔ |
+| Files | PSpice Schematics .sch import (page 1; library parts R C L V/I sources E F G H D1N4148 switches PARAM BUBBLE grounds; analysis setup) | 🟡 tested on a hand-made 9.1-format file only — real course files still to be verified |
+| Files | OrCAD Capture .dsn/.opj import, multi-page .sch, transistor/op-amp parts | ⛔ |
 | Desktop | Tauri macOS app | ⛔ (M4) |

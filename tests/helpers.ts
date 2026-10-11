@@ -1,10 +1,12 @@
 import { runSchematic } from '../src/sim/schematicSim';
 import { NodeNgspiceEngine } from '../src/sim/nodeEngine';
+import { NodeWasmEngine } from '../src/sim/nodeWasmEngine';
 import { getVector, Plot } from '../src/sim/types';
 import { SchematicDoc } from '../src/core/model';
 export { Builder, divider, stepSeries, rcLowpass, switchedRL } from '../src/core/examples';
 
-export const engine = new NodeNgspiceEngine();
+/** OPENSPICE_ENGINE=wasm runs the whole suite on ngspice-WebAssembly (the production backend). */
+export const engine = process.env.OPENSPICE_ENGINE === 'wasm' ? new NodeWasmEngine() : new NodeNgspiceEngine();
 
 /** Same path as the GUI: runSchematic (incl. PSpice-style IC handling) on real ngspice. */
 export async function simulate(doc: SchematicDoc): Promise<Plot[]> {

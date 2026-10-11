@@ -23,6 +23,11 @@ tests/           vitest: units, connectivity (G), simulation (A–F, H), seriali
 
 Data flow: Doc → `extractConnectivity` → `generateNetlist` → `engine.run` → `parseRawAscii` → `probeModel` → Probe/bias overlay.
 
+Simulation backends (src/sim): `AutoEngine` picks `LocalNgspiceEngine` (native ngspice via the dev-server
+service, server/ngspiceRunner.ts) when /api/health answers, otherwise `WasmNgspiceEngine` (ngspice-WebAssembly
+in a Web Worker, wasmWorker.ts → wasmCore.ts). Both consume the same deck rules (src/sim/deck.ts) and produce
+the same Plot/Vector results, so everything above the engine is backend-independent.
+
 Key decisions
 - **Engine**: native ngspice-47 via a local service. Verified working; the same runner becomes a Tauri
   sidecar in M4. ngspice-WASM (eecircuit-engine / ngspice-wasm) not yet evaluated — the `SimulationEngine`

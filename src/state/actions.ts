@@ -2,14 +2,17 @@
 import { useStore, readAutosave, clearAutosave, DEFAULT_CIR, saveCirDraft, CirDoc } from './store';
 import { generateNetlist } from '../core/netlist';
 import { serialize, FILE_EXT } from '../core/serialize';
-import { LocalNgspiceEngine } from '../sim/httpEngine';
-import { SimulationEngine, SimResult } from '../sim/types';
+import { importSch } from '../core/schImport';
+import { AutoEngine } from '../sim/autoEngine';
+import { SimResult } from '../sim/types';
 import { runSchematic } from '../sim/schematicSim';
 import { runParametric } from '../sim/parametric';
 import { runDeck } from '../sim/netlistSim';
 import { pinPositions, getDef, xf } from '../core/library';
 
-export const engine: SimulationEngine = new LocalNgspiceEngine();
+export const engine = new AutoEngine();
+/** Pick (and pre-load) the simulation backend at startup. */
+export function initEngine() { void engine.choose().then(e => useStore.setState({ status: `Ready — simulator: ${e.name}` })); }
 const S = () => useStore.getState();
 
 export function confirmDiscard(): boolean {
@@ -18,16 +21,31 @@ export function confirmDiscard(): boolean {
 
 export function fileNew() { if (confirmDiscard()) { S().newDoc(); clearAutosave(); } }
 
-export function fileOpen() {
+export function fileOpen(accept = `${FILE_EXT},.json,.sch`) {
   if (!confirmDiscard()) return;
   const input = document.createElement('input');
-  input.type = 'file'; input.accept = `${FILE_EXT},.json`;
+  input.type = 'file'; input.accept = accept;
   input.onchange = async () => {
     const f = input.files?.[0]; if (!f) return;
-    try { S().loadText(await f.text(), f.name); setTimeout(zoomFit, 0); }
+    if (f.size > 5_000_000) { alert(`${f.name} is too large (over 5 MB)`); return; }
+    const text = await f.text();
+    if (/\.sch$/i.test(f.name) || /^\*version\s/i.test(text)) { importSchText(text, f.name); return; }
+    try { S().loadText(text, f.name); setTimeout(zoomFit, 0); }
     catch (e) { alert(`Cannot open ${f.name}: ${(e as Error).message}`); }
   };
   input.click();
+}
+
+/** File ▸ Import: PSpice/MicroSim Schematics .sch → new OpenSpice schematic + import report. */
+export function fileImportSch() { fileOpen('.sch'); }
+export function importSchText(text: string, name: string) {
+  try {
+    const r = importSch(text, name);
+    S().loadText(serialize(r.doc), name.replace(/\.sch$/i, FILE_EXT));
+    useStore.setState({ dirty: true, importReport: { file: name, notes: r.notes, warnings: r.warnings }, dialog: 'importReport',
+      status: `Imported ${name}${r.warnings.length ? ` with ${r.warnings.length} warning(s)` : ''}` });
+    setTimeout(zoomFit, 0);
+  } catch (e) { alert(`Cannot import ${name}: ${(e as Error).message}`); }
 }
 
 export function openDoc(doc: import('../core/model').SchematicDoc) {

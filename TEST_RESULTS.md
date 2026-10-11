@@ -1,6 +1,6 @@
 # Test results — 2026-10-10 (ngspice-47, macOS arm64)
 
-`npm test` → 15 files, 141 tests, all passed (latest run, 0.4.3).
+`npm test` (native ngspice) → 18 files, 160 tests, all passed; `npm run test:wasm` (ngspice-WebAssembly, the production backend) → 18 files, 160 tests, all passed (0.5.1).
 
 New in 0.2.0 (tests/orders.test.ts), all with PSpice default Print Step 20ns, no Step Ceiling:
 | Circuit | Expected | Tol. | Result |
@@ -73,3 +73,12 @@ tests/marker.test.ts: marker hit area (bubble, lead) and label-avoidance box. Br
 
 ## 0.4.3
 tests/bubble.test.ts: divider wired only with bubbles → V(OUT) = 6 V and no BUBBLE device in the netlist; bubbles on wire ends join wires; missing/unattached label warnings. E/F/G/H tests re-run with the resized symbols (pin names/positions as in 0.4.0). Browser: bubble-only grounding of V1 and R2 → 10 V / 6 V; V and I markers placed by snapping, sized and coloured; E/F/G/H next to a resistor for size.
+
+## 0.4.4
+tests/snapping.test.ts (7) + editor test: wire-point snapping, determinism, pin preference, current-marker pin filter, crossings, reach. Browser (dispatched events, 3 zooms × 3 points): preview ring position == placed marker position in all 9 cases.
+
+## 0.5.0 — production backend
+Full suite on ngspice-WebAssembly: 153/153 (divider, RC/RL/RLC, ICs, switches, DC sweep, AC, parametric, .STEP, .MEAS, E/F/G/H, bubbles, Netlist Mode examples). tests/wasm-engine.test.ts: non-ASCII deck, all four analyses in one deck, broken deck does not poison the next run, forbidden statements. Production build served statically (vite preview, no /api — HTTP 404 like Vercel): app selected WebAssembly automatically; switched-RL parametric (5/5 runs) and RC low-pass AC simulated from the GUI.
+
+## 0.5.1 — .sch import
+tests/schImport.test.ts (7): parts/values/refs/wires/labels/grounds, wrong orientation corrected (no short), unsupported part reported, title block skipped, .TRAN/.DC setup read, imported circuit simulates to 6 V, misaligned pins joined with a reported stub, non-.sch rejected. Fixture tests/fixtures/divider91.sch is hand-written from the documented format (no real PSpice 9.1 file was available). Browser: imported fixture → report dialog → F11 → V(OUT) = 6 V, transient and DC sweep ran.

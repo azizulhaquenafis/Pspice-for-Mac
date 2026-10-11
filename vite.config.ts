@@ -5,5 +5,8 @@ import { ngspicePlugin } from './server/ngspicePlugin';
 export default defineConfig({
   plugins: [react(), ngspicePlugin()],
   server: { port: 5173, host: '127.0.0.1' },
+  // ngspice-WebAssembly runs in a module Web Worker (src/sim/wasmWorker.ts)
+  worker: { format: 'es' },
+  build: { chunkSizeWarningLimit: 25000 },
   test: { globals: true, environment: 'node', testTimeout: 30000 },
 } as any);

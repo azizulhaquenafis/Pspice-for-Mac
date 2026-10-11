@@ -33,6 +33,9 @@ describe('snapping', () => {
   it('junction tool snaps to wire crossings first', () => {
     expect(snapToConnection(d, { x: 224, y: 96 }, 10, SNAP_FOR.junction)).toEqual({ p: { x: 220, y: 100 }, kind: 'cross' });
   });
+  it('pointing at a wire snaps even when the nearest grid point along it is a little farther away', () => {
+    expect(snapToConnection(d, { x: 255, y: 102 }, 4, SNAP_FOR.voltageMarker)).toEqual({ p: { x: 260, y: 100 }, kind: 'wire' });
+  });
   it('nothing in reach → null (reach is the caller’s screen-pixel tolerance in world units)', () => {
     expect(snapToConnection(d, { x: 260, y: 130 }, 10, SNAP_FOR.voltageMarker)).toBeNull();
     expect(snapToConnection(d, { x: 260, y: 130 }, 40, SNAP_FOR.voltageMarker)).toEqual({ p: { x: 260, y: 100 }, kind: 'wire' });

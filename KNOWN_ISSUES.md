@@ -1,5 +1,6 @@
 # Known issues / limitations
-- Requires native ngspice + the Vite dev server (`npm run dev`); no pure-browser (WASM) engine yet.
+- Online (WebAssembly) engine: the first visit downloads the ngspice engine (~20 MB uncompressed, cached afterwards);
+  each simulation is limited to 120 s; ngspice runs in the browser, so very large circuits depend on the visitor's machine.
 - AC analysis: device currents of R/C/L/D are not available (ngspice-47 savecurrents bug); voltages and V-source currents are.
 - IC= handling in .cir decks applies to top-level C/L lines only (not inside .SUBCKT).
 - Current marker on a pin shared by two parts picks the first part found there.
@@ -24,3 +25,4 @@
 - Probe still lacks Fourier (FFT), multiple plot windows / y-axes, .dat save/load and Performance Analysis.
 - Trace styles, marks and selections are per session (not saved in the project yet).
 - E/F/G/H parts saved with 0.4.1–0.4.2 had output pins at x = 60; they are now at x = 40 again — reconnect those output wires.
+- .sch import is built from the documented PSpice 9.1 layout and tested on a hand-made file; real course files may contain constructs not handled yet — please send one. PSpice symbol libraries (.slb) are proprietary, so OpenSpice symbols are aligned to the imported wires (reported in the import report). Only page 1 is imported.

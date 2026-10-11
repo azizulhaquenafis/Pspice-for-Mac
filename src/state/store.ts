@@ -19,7 +19,7 @@ export type Tool =
   | { kind: 'marker'; marker: Marker['kind'] };
 
 export type Dialog =
-  | null | 'partBrowser' | 'analysis' | 'tran' | 'dc' | 'ac' | 'param' | 'netlist' | 'about' | 'erc' | 'output'
+  | null | 'partBrowser' | 'analysis' | 'tran' | 'dc' | 'ac' | 'param' | 'importReport' | 'netlist' | 'about' | 'erc' | 'output'
   | { kind: 'props'; partId: string } | { kind: 'partInfo'; partId: string } | { kind: 'label'; labelId?: string; at?: Pt; mode: 'alias' | 'text' };
 
 export interface Selection { parts: string[]; wires: string[]; labels: string[]; junctions: string[]; markers: string[] }
@@ -56,6 +56,8 @@ interface State {
   commitView(fn: (d: SchematicDoc) => SchematicDoc, msg?: string): void;
   /** Netlist-editor Probe traces (null = default node voltages). */
   cirTraces: string[] | null;
+  /** Result of the last .sch import (shown in the Import Report dialog). */
+  importReport: { file: string; notes: string[]; warnings: string[] } | null;
   /** Signals named on .PROBE lines of the last netlist run. */
   cirProbes: string[];
   undo(): void; redo(): void;
@@ -134,6 +136,7 @@ export const useStore = create<State>((set, get) => ({
   highlightNet: null,
   clipboard: null,
   cirTraces: null,
+  importReport: null,
   cirProbes: [],
 
   commit(fn, msg) {

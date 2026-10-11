@@ -3,7 +3,7 @@ import { useStore } from '../state/store';
 import * as A from '../state/actions';
 import { Canvas, canvasHooks } from './Canvas';
 import { Probe } from './Probe';
-import { PartBrowser, PropertiesDialog, PartInfoDialog, LabelDialog, AnalysisSetup, ParamDialog, TranDialog, DcDialog, AcDialog, NetlistViewer, ErcDialog, OutputDialog, AboutDialog } from './Dialogs';
+import { PartBrowser, PropertiesDialog, PartInfoDialog, ImportReportDialog, LabelDialog, AnalysisSetup, ParamDialog, TranDialog, DcDialog, AcDialog, NetlistViewer, ErcDialog, OutputDialog, AboutDialog } from './Dialogs';
 import { Icon } from './icons';
 import { NetlistWorkspace, netlistEditorHooks } from './NetlistEditor';
 import { NETLIST_EXAMPLES } from '../core/netlistExamples';
@@ -23,7 +23,7 @@ const MENUS: [string, Item[]][] = [
     ...EXAMPLES.map(ex => ({ label: `Open Example: ${ex.name}`, run: () => A.openDoc(ex.make()) })), { label: 'Close', run: NA },
     { label: 'Save', key: 'Ctrl+S', run: () => A.fileSave() }, { label: 'Save As...', run: () => A.fileSave(true) }, sep,
     { label: 'Print...', run: () => window.print() }, sep,
-    { label: 'Import...', run: NA }, { label: 'Export Netlist...', run: A.exportNetlist }, sep,
+    { label: 'Import PSpice Schematic (.sch)...', run: A.fileImportSch }, { label: 'Export Netlist...', run: A.exportNetlist }, sep,
     { label: 'New Netlist (.cir)', run: A.newCir }, { label: 'Open Netlist (.cir)...', run: A.openCir },
     { label: 'Save Netlist (.cir)...', run: A.saveCir }, sep,
     { label: 'Current Errors', run: A.electricalRuleCheck },
@@ -307,7 +307,7 @@ function Dialogs() {
   if (typeof d === 'object') return d.kind === 'props' ? <PropertiesDialog key={d.partId} partId={d.partId} /> : d.kind === 'partInfo' ? <PartInfoDialog partId={d.partId} /> : <LabelDialog {...d} />;
   const map: Record<string, ReactNode> = {
     partBrowser: <PartBrowser />, analysis: <AnalysisSetup />, param: <ParamDialog />, tran: <TranDialog />, dc: <DcDialog />, ac: <AcDialog />,
-    netlist: <NetlistViewer />, erc: <ErcDialog />, output: <OutputDialog />, about: <AboutDialog />,
+    netlist: <NetlistViewer />, erc: <ErcDialog />, importReport: <ImportReportDialog />, output: <OutputDialog />, about: <AboutDialog />,
   };
   return <>{map[d]}</>;
 }
