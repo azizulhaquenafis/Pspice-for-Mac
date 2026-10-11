@@ -26,3 +26,4 @@
 - Trace styles, marks and selections are per session (not saved in the project yet).
 - E/F/G/H parts saved with 0.4.1–0.4.2 had output pins at x = 60; they are now at x = 40 again — reconnect those output wires.
 - .sch import is built from the documented PSpice 9.1 layout and tested on a hand-made file; real course files may contain constructs not handled yet — please send one. PSpice symbol libraries (.slb) are proprietary, so OpenSpice symbols are aligned to the imported wires (reported in the import report). Only page 1 is imported.
+- The Print Step auto-fix changes only the simulated deck; the Transient dialog keeps the value you typed (the warning shows the value used).

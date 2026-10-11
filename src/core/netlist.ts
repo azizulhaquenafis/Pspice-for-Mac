@@ -56,6 +56,7 @@ export function generateNetlist(doc: SchematicDoc, opts: NetlistOptions = {}): N
   conn.warnings.forEach(w => diags.push({ level: 'warning', message: w }));
   const lines: string[] = [];
   const models = new Set<string>();
+  const modelCards = new Map<string, string>();   // lower-case model name -> card body (per-part .model cards)
   const reactive: NetlistResult['reactive'] = [];
   const spiceName = new Map<string, string>();
   const seen = new Map<string, string>();
@@ -112,14 +113,37 @@ export function generateNetlist(doc: SchematicDoc, opts: NetlistOptions = {}): N
         continue;
       }
       if (pd.kind === 'num') { vals[pd.name] = num(raw, `${p.ref} ${pd.name}`, diags, p.id); nums[pd.name] = parseFloat(vals[pd.name]); }
-      else {
+      else if (pd.kind === 'model') {
+        if (!MODEL_NAME.test(raw)) diags.push({ level: 'error', message: `${p.ref} MODEL: "${raw}" is not a valid model name (letters, digits, _ . -)`, partId: p.id });
+        vals[pd.name] = raw;
+      } else if (pd.kind === 'raw') {
+        const r = modelParams(raw, lookup);
+        r.errors.forEach(e => diags.push({ level: 'error', message: `${p.ref} ${pd.name}: ${e}`, partId: p.id }));
+        vals[pd.name] = r.text;
+      } else {
         const toks = raw.split(/[\s,]+/).filter(Boolean);
         const bad = toks.find(t => !parseSpiceNumber(t).ok);
         if (bad || toks.length % 2) diags.push({ level: 'error', message: `${p.ref} ${pd.name}: expected numeric time/value pairs`, partId: p.id });
         vals[pd.name] = toks.map(t => spiceNum(parseSpiceNumber(t).value)).join(' ');
       }
     }
+    if (def.check && def.props.every(pd => pd.kind !== 'num' || !vals[pd.name] || Number.isFinite(nums[pd.name])))
+      def.check(nums).forEach(message => diags.push({ level: 'error', message: `${p.ref}: ${message}`, partId: p.id }));
     def.models?.forEach(m => models.add(m));
+    if (def.modelType && vals.MODEL) {
+      // Each part brings its own .model card. Parts sharing a model name share one card when their
+      // parameters agree; otherwise the later part gets a private name so no run uses stale values.
+      const body = [...def.props.filter(pd => pd.model && pd.kind === 'num' && vals[pd.name]).map(pd => `${pd.name}=${vals[pd.name]}`),
+        ...(vals.EXTRA ? [vals.EXTRA] : [])].join(' ');
+      let mname = vals.MODEL;
+      const prev = modelCards.get(mname.toLowerCase());
+      if (prev !== undefined && prev !== body) {
+        mname = `${vals.MODEL}_${name}`;
+        diags.push({ level: 'warning', message: `${p.ref}: model ${vals.MODEL} has different parameters than another part using that name; netlisted as ${mname}`, partId: p.id });
+      }
+      if (!modelCards.has(mname.toLowerCase())) { modelCards.set(mname.toLowerCase(), body); models.add(`.model ${mname} ${def.modelType}(${body})`); }
+      vals.MODEL = mname;
+    }
     if (p.type === 'C' || p.type === 'L') {
       const ic = vals.IC ? nums.IC : null;
       reactive.push({ partId: p.id, name, kind: p.type, nodes: [nodes[0], nodes[1]], ic });
@@ -149,8 +173,9 @@ export function generateNetlist(doc: SchematicDoc, opts: NetlistOptions = {}): N
     const runs = prof.param.enabled ? Math.max(1, sweepValues(prof.param).values.length) : 1;
     const plan = planTran(parseFloat(ps), parseFloat(ft), parseFloat(np), tmaxIn, runs);
     if (plan.error) diags.push({ level: 'error', message: `Transient: ${plan.error}` });
+    if (plan.stepFix) diags.push({ level: 'warning', message: `Transient: ${plan.stepFix}` });
     interpOpt = plan.interp;
-    let cmd = `.tran ${ps} ${ft} ${np} ${spiceNum(plan.tmax || parseFloat(ft) / 200)}`;
+    let cmd = `.tran ${plan.stepFix ? spiceNum(plan.tstep) : ps} ${ft} ${np} ${spiceNum(plan.tmax || parseFloat(ft) / 200)}`;
     if (t.uic || opts.initialState) cmd += ' UIC';
     an.push(cmd);
   }
@@ -195,6 +220,25 @@ export function generateNetlist(doc: SchematicDoc, opts: NetlistOptions = {}): N
   return { text, ok: !diags.some(d => d.level === 'error'), diagnostics: diags, conn, spiceName, needsIcPass, reactive };
 }
 
+const MODEL_NAME = /^[A-Za-z_][A-Za-z0-9_.\-]*$/;
+
+/** Validate "NAME=value ..." .model parameters (values: numbers with SPICE suffixes or {expressions}). */
+export function modelParams(raw: string, lookup: (n: string) => number): { text: string; errors: string[] } {
+  const errors: string[] = [], out: string[] = [];
+  const toks = raw.replace(/\s*=\s*/g, '=').match(/[^\s{]+=\{[^}]*\}|\S+/g) ?? [];
+  for (const t of toks) {
+    const m = /^([A-Za-z][A-Za-z0-9_]*)=(.+)$/.exec(t);
+    if (!m) { errors.push(`"${t}" is not NAME=value`); continue; }
+    if (isBraced(m[2])) {
+      try { evalExpr(unbrace(m[2]), lookup); out.push(`${m[1]}={${exprToSpice(unbrace(m[2]))}}`); } catch (e) { errors.push(`${m[1]}: ${(e as Error).message}`); }
+      continue;
+    }
+    const r = parseSpiceNumber(m[2]);
+    if (!r.ok) errors.push(`${m[1]}: ${r.error}`); else out.push(`${m[1]}=${spiceNum(r.value)}`);
+  }
+  return { text: out.join(' '), errors };
+}
+
 /** Raw-file vector giving current INTO the given pin (and sign). Positive SPICE reference = into pin 1 / "+". */
 export function currentVector(p: Part, pin: string, spiceName: string): { vec: string; sign: 1 | -1; label: string } | null {
   const def = getDef(p.type);
@@ -206,6 +250,13 @@ export function currentVector(p: Part, pin: string, spiceName: string): { vec: s
     case 'V': case 'E': case 'H': vec = `i(${n})`; break;
     case 'I': vec = `i(@${n}[current])`; break;
     case 'D': vec = `i(@${n}[id])`; break;
+    case 'Q': case 'M': {
+      const k = pin.toLowerCase();
+      if (!def.pins.some(q => q.name.toLowerCase() === k)) return null;
+      // ngspice reports MOS terminal currents in the device frame: for PMOS they are the negative of the
+      // current INTO the terminal (checked against series resistors); NMOS, NPN and PNP are into-terminal.
+      return { vec: `i(@${n}[i${k}])`, sign: def.modelType === 'PMOS' ? -1 : 1, label: `I(${p.ref}:${pin})` };
+    }
     default: return null;
   }
   if ('EGFH'.includes(def.spiceLetter) && (pin === 'C+' || pin === 'C-')) {

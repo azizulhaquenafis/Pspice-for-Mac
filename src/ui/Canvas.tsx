@@ -93,7 +93,8 @@ export function Canvas() {
         continue;
       }
       const pins = pinPositions(p);
-      const c = xf(p, 0, 0), o = xf(p, getDef(p.type).isBubble ? 14 : getDef(p.type).pins.length > 2 ? 50 : 40, 0);
+      const bd = getDef(p.type).body;
+      const c = bd ? xf(p, bd[0], bd[1]) : xf(p, 0, 0), o = bd ? xf(p, bd[2], bd[3]) : xf(p, getDef(p.type).isBubble ? 14 : getDef(p.type).pins.length > 2 ? 50 : 40, 0);
       const xs = [...pins.map(q => q.x), c.x, o.x], ys = [...pins.map(q => q.y), c.y, o.y];
       const pad = Math.max(4, 6 / v.zoom);
       if (w.x >= Math.min(...xs) - pad && w.x <= Math.max(...xs) + pad && w.y >= Math.min(...ys) - pad && w.y <= Math.max(...ys) + pad) return { kind: 'part' as const, id: p.id };
@@ -498,21 +499,27 @@ function BiasOverlay({ td }: { td: TextDrag }) {
   if (showBiasI) for (const p of doc.parts) {
     const def = getDef(p.type);
     if (def.isGround || def.isParam || def.isBubble) continue;
-    const pin = def.pins[0].name;
-    const cv = currentVector(p, 'EGFH'.includes(def.spiceLetter) ? '+' : pin, spiceNameFor(p));
-    const vec = cv && getVector(op, cv.vec);
-    if (!cv || !vec) continue;
-    const pp = pinPositions(p)[0];
-    const inward = xf(p, def.pins[0].x + (def.pins[1].x - def.pins[0].x) * 0.15, def.pins[0].y + (def.pins[1].y - def.pins[0].y) * 0.15);
-    const dx = Math.sign(inward.x - pp.x), dy = Math.sign(inward.y - pp.y);
-    const txt = `${formatEng(vec.re[0], 4)}A`, w = txt.length * 5.6 + 4;
-    const at = choose([{ x: pp.x + (dy ? 6 : -12), y: pp.y + (dx ? 4 : -12) }, { x: pp.x - w - 6, y: pp.y - 12 }, { x: pp.x + 6, y: pp.y + 4 }, { x: pp.x - w / 2, y: pp.y - 26 }], w);
-    const key = `i:${p.id}`, o = offFor(key);
-    out.push(<g key={key}>
-      <path d={`M${pp.x - dx * 6 - dy * 3} ${pp.y - dy * 6 + dx * 3} l${dx * 6} ${dy * 6}`} className="bias-arrow" markerEnd="url(#arrow)" />
-      <g className="drag" data-drag={`bias:${key}`} transform={`translate(${at.x + o.x} ${at.y + o.y})`}>
-        <rect x={0} y={0} width={w} height={11} className="bias-box i" /><text x={2} y={8.5} className="bias i">{txt}</text></g>
-    </g>);
+    // two-terminal parts: the current into pin 1; BJTs / MOSFETs: the current into every terminal
+    const multi = 'QM'.includes(def.spiceLetter) && !!def.spiceLetter;
+    const pins = multi ? def.pins : [def.pins[0]];
+    const ctr = def.body ? { x: (def.body[0] + def.body[2]) / 2, y: (def.body[1] + def.body[3]) / 2 } : null;
+    pins.forEach((pin, k) => {
+      const cv = currentVector(p, 'EGFH'.includes(def.spiceLetter) ? '+' : pin.name, spiceNameFor(p));
+      const vec = cv && getVector(op, cv.vec);
+      if (!cv || !vec) return;
+      const pp = pinPositions(p)[def.pins.indexOf(pin)];
+      const toward = ctr ?? { x: def.pins[1].x, y: def.pins[1].y };
+      const inward = xf(p, pin.x + (toward.x - pin.x) * 0.15, pin.y + (toward.y - pin.y) * 0.15);
+      const dx = Math.sign(inward.x - pp.x), dy = Math.sign(inward.y - pp.y);
+      const txt = `${formatEng(vec.re[0] * cv.sign, 4)}A`, w = txt.length * 5.6 + 4;
+      const at = choose([{ x: pp.x + (dy ? 6 : -12), y: pp.y + (dx ? 4 : -12) }, { x: pp.x - w - 6, y: pp.y - 12 }, { x: pp.x + 6, y: pp.y + 4 }, { x: pp.x - w / 2, y: pp.y - 26 }], w);
+      const key = multi ? `i:${p.id}:${k}` : `i:${p.id}`, o = offFor(key);
+      out.push(<g key={key}>
+        <path d={`M${pp.x - dx * 6 - dy * 3} ${pp.y - dy * 6 + dx * 3} l${dx * 6} ${dy * 6}`} className="bias-arrow" markerEnd="url(#arrow)" />
+        <g className="drag" data-drag={`bias:${key}`} transform={`translate(${at.x + o.x} ${at.y + o.y})`}>
+          <rect x={0} y={0} width={w} height={11} className="bias-box i" /><text x={2} y={8.5} className="bias i">{txt}</text></g>
+      </g>);
+    });
   }
   return <g><defs><marker id="arrow" viewBox="0 0 6 6" refX={5} refY={3} markerWidth={5} markerHeight={5} orient="auto"><path d="M0 0 L6 3 L0 6 Z" className="bias-arrowhead" /></marker></defs>{out}</g>;
 }

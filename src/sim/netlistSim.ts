@@ -3,6 +3,7 @@
 // elements held (pass 1) and the transient starts from that state with UIC (pass 2).
 import { translateDeck } from '../core/deckTranslate';
 import { parseSpiceNumber, spiceNum, formatEng } from '../core/units';
+import { ParamDef, resolveParams, evalExpr, isBraced, unbrace } from '../core/params';
 import { SimulationEngine, SimResult, SimStep, getVector } from './types';
 
 export interface Measurement { name: string; value: number; step?: string }
@@ -20,6 +21,16 @@ async function runTranslated(text: string, engine: SimulationEngine, signal?: Ab
   const tranIdx = lines.findIndex(l => /^\s*\.tran\b/i.test(l));
   const uic = tranIdx >= 0 && /\buic\b/i.test(lines[tranIdx]);
   const reactive: Reactive[] = [];
+  // top-level .param values, so IC={expr} resolves the same way ngspice will (per .STEP run, since each run's text differs)
+  const paramDefs: ParamDef[] = [];
+  let pdepth = 0;
+  for (const l of lines.slice(1)) {
+    if (/^\s*\.subckt\b/i.test(l)) pdepth++; else if (/^\s*\.ends\b/i.test(l)) pdepth--;
+    const pm = pdepth === 0 && /^\s*\.param\s+(.*)$/i.exec(l);
+    if (pm) for (const kv of pm[1].matchAll(/(\w+)\s*=\s*(\{[^}]*\}|'[^']*'|[^\s,]+)/g)) paramDefs.push({ name: kv[1], expr: kv[2].replace(/^'(.*)'$/, '{$1}') });
+  }
+  const ptab = resolveParams(paramDefs);
+  const icErrors: string[] = [];
   let depth = 0;
   lines.forEach((l, idx) => {
     if (idx === 0) return;
@@ -27,10 +38,19 @@ async function runTranslated(text: string, engine: SimulationEngine, signal?: Ab
     else if (/^\s*\.ends\b/i.test(l)) depth--;
     const m = depth === 0 && /^\s*([cl]\S*)\s+(\S+)\s+(\S+)\s+(.*)$/i.exec(l);
     if (!m) return;
-    const icm = /\bic\s*=\s*(\S+)/i.exec(m[4]);
-    const ic = icm ? parseSpiceNumber(icm[1]) : null;
-    reactive.push({ idx, name: m[1], n1: m[2], n2: m[3], rest: m[4].replace(/\bic\s*=\s*\S+/i, '').trim(), ic: ic?.ok ? ic.value : null });
+    const icm = /\bic\s*=\s*(\{[^}]*\}|'[^']*'|\S+)/i.exec(m[4]);
+    let ic: number | null = null;
+    if (icm) {
+      const raw = icm[1].replace(/^'(.*)'$/, '{$1}');
+      try {
+        ic = isBraced(raw)
+          ? evalExpr(unbrace(raw), n => { const v = ptab.values.get(n.toLowerCase()); if (v === undefined) throw new Error(`undefined parameter "${n}"`); return v; })
+          : (() => { const r = parseSpiceNumber(raw); if (!r.ok) throw new Error(r.error); return r.value; })();
+      } catch (e) { icErrors.push(`${m[1]}: IC=${icm[1]} cannot be evaluated (${(e as Error).message})`); }
+    }
+    reactive.push({ idx, name: m[1], n1: m[2], n2: m[3], rest: m[4].replace(/\bic\s*=\s*(\{[^}]*\}|'[^']*'|\S+)/i, '').trim(), ic });
   });
+  if (icErrors.length) return fail(icErrors);
   if (tranIdx < 0 || uic || !reactive.some(r => r.ic !== null)) {
     return { result: await engine.run(tr.text, signal), deck: tr.text, notes: [] };
   }

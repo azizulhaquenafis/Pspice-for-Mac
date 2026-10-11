@@ -5,5 +5,8 @@ import { SimulationEngine, SimResult } from './types';
 export class NodeWasmEngine implements SimulationEngine {
   readonly name = 'ngspice (WebAssembly, node)';
   private core = new WasmNgspice(() => import('eecircuit-engine'));
-  run(netlist: string): Promise<SimResult> { return this.core.run(netlist); }
+  run(netlist: string, signal?: AbortSignal): Promise<SimResult> {
+    if (signal?.aborted) return Promise.resolve({ ok: false, plots: [], log: '', errors: ['Simulation cancelled'], elapsedMs: 0 });
+    return this.core.run(netlist);
+  }
 }

@@ -1,5 +1,5 @@
 // Command layer: menus, toolbar buttons and keyboard shortcuts all call these.
-import { useStore, readAutosave, clearAutosave, DEFAULT_CIR, saveCirDraft, CirDoc } from './store';
+import { useStore, readAutosave, clearAutosave, DEFAULT_CIR, saveCirDraft, CirDoc, circuitSignature, isStale, replacedSim } from './store';
 import { generateNetlist } from '../core/netlist';
 import { serialize, FILE_EXT } from '../core/serialize';
 import { importSch } from '../core/schImport';
@@ -54,23 +54,37 @@ export function openDoc(doc: import('../core/model').SchematicDoc) {
   setTimeout(() => zoomFit(), 0);
 }
 
-let fileHandle: any = null;
+/** File handles belong to the document session that chose them (B01): New/Open/Import never reuse them. */
+const handles: { doc?: { session: number; h: any }; cir?: { session: number; h: any } } = {};
+
 export async function fileSave(as = false) {
   const st = S();
+  const session = st.docSession, rev = st.docRev;   // what is being written
   const text = serialize({ ...st.doc, netlist: { text: st.cir.text, fileName: st.cir.fileName, origin: st.cir.origin } });
   const w = window as any;
+  /** Only the document that was saved, and only if it was not edited meanwhile, becomes "saved" (B13). */
+  const done = (name: string, how = '') => {
+    if (S().docSession !== session) return; // replaced during the save: leave the new document alone
+    const edited = S().docRev !== rev;
+    useStore.setState({ fileName: name, dirty: edited, status: edited ? `Saved ${name}${how} — changes made during the save are not saved yet` : `Saved ${name}${how}` });
+    if (!edited) clearAutosave();
+  };
   try {
     if (w.showSaveFilePicker) {
-      if (as || !fileHandle) fileHandle = await w.showSaveFilePicker({ suggestedName: (st.fileName ?? st.doc.title) .replace(/(\.osch)?$/, FILE_EXT), types: [{ description: 'OpenSpice schematic', accept: { 'application/json': [FILE_EXT] } }] });
-      const wr = await fileHandle.createWritable(); await wr.write(text); await wr.close();
-      useStore.setState({ fileName: fileHandle.name, dirty: false, status: `Saved ${fileHandle.name}` });
+      let h = handles.doc?.session === session ? handles.doc.h : null;
+      if (as || !h) {
+        h = await w.showSaveFilePicker({ suggestedName: (st.fileName ?? st.doc.title).replace(/(\.osch)?$/, FILE_EXT), types: [{ description: 'OpenSpice schematic', accept: { 'application/json': [FILE_EXT] } }] });
+        handles.doc = { session, h };
+      }
+      const wr = await h.createWritable(); await wr.write(text); await wr.close();
+      done(h.name);
     } else {
       const name = as || !st.fileName ? (prompt('Save as:', st.fileName ?? `${st.doc.title}${FILE_EXT}`) ?? '') : st.fileName;
       if (!name) return;
-      download(name.endsWith(FILE_EXT) ? name : name + FILE_EXT, text, 'application/json');
-      useStore.setState({ fileName: name, dirty: false, status: `Saved ${name} (downloaded)` });
+      const fn = name.endsWith(FILE_EXT) ? name : name + FILE_EXT;
+      download(fn, text, 'application/json');
+      done(fn, ' (downloaded)');
     }
-    clearAutosave();
   } catch (e) { if ((e as Error).name !== 'AbortError') alert(`Save failed: ${(e as Error).message}`); }
 }
 
@@ -88,10 +102,9 @@ export function download(name: string, data: string | Blob, type = 'text/plain')
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+/** Netlist of the current schematic, for previews/export/ERC. Pure: never touches the recorded simulated deck (B02). */
 export function createNetlist() {
-  const nl = generateNetlist(S().doc);
-  useStore.setState(s => ({ sim: { ...s.sim, netlist: nl.text } }));
-  return nl;
+  return generateNetlist(S().doc);
 }
 
 export function exportNetlist() { const nl = createNetlist(); download(`${S().doc.title}.cir`, nl.text); }
@@ -107,17 +120,36 @@ export async function simulate() {
   return S().mainView === 'netlist' ? simulateNetlist() : simulateSchematic();
 }
 
-function finishRun(result: SimResult, deck: string, source: 'schematic' | 'netlist', notes: string[]) {
+let runSeq = 0;
+interface RunCtx { id: number; kind: 'schematic' | 'netlist'; session: number; sig: string; cirText: string }
+
+function beginRun(kind: RunCtx['kind'], status: string): { ctx: RunCtx; abort: AbortController } {
+  const st = S();
+  const ctx: RunCtx = { id: ++runSeq, kind, session: kind === 'schematic' ? st.docSession : st.cirSession, sig: circuitSignature(st.doc), cirText: st.cir.text };
+  const abort = new AbortController();
+  useStore.setState(s => ({ sim: { ...s.sim, running: true, abort, runId: ctx.id, runKind: kind }, status }));
+  return { ctx, abort };
+}
+
+/** Apply a finished run — only if it is still the current run for the same document (B04). */
+function finishRun(ctx: RunCtx, result: SimResult, deck: string, notes: string[]): boolean {
+  const st = S();
+  if (st.sim.runId !== ctx.id) return false;                       // superseded or cancelled by a document change
+  const session = ctx.kind === 'schematic' ? st.docSession : st.cirSession;
+  if (session !== ctx.session) { useStore.setState(s => ({ sim: { ...s.sim, running: false, abort: undefined, runId: undefined } })); return false; }
   const tl = /^\s*\.temp\s+(\S+)/im.exec(deck);
   result = { ...result, time: Date.now(), temp: tl ? parseFloat(tl[1]) : 27 };
   const hasWave = result.plots.some(p => p.kind !== 'op');
+  const sim = { ...st.sim, running: false, abort: undefined, result, netlist: deck, source: ctx.kind, notes, sig: ctx.sig, cirText: ctx.cirText };
   useStore.setState(s => ({
-    sim: { ...s.sim, running: false, abort: undefined, result, stale: false, netlist: deck, source, notes },
+    // edits made while the simulation ran make the result stale straight away
+    sim: { ...sim, stale: isStale(sim, s.doc, s.cir.text) },
     status: result.ok ? `Simulation complete (${result.elapsedMs.toFixed(0)} ms)` : `Simulation failed: ${result.errors[0] ?? ''}`,
-    showBiasV: result.ok && source === 'schematic' ? true : s.showBiasV,
+    showBiasV: result.ok && ctx.kind === 'schematic' ? true : s.showBiasV,
     probeOpen: result.ok && hasWave ? true : s.probeOpen,
   }));
   if (!result.ok || result.errors.length) S().setDialog('output');
+  return true;
 }
 
 export async function simulateSchematic() {
@@ -125,27 +157,29 @@ export async function simulateSchematic() {
   if (st.sim.running) return;
   const nl = createNetlist();
   if (!nl.ok) { st.setDialog('erc'); st.setStatus('Netlist errors — simulation not started'); return; }
-  const abort = new AbortController();
-  useStore.setState(s => ({ sim: { ...s.sim, running: true, abort }, status: `Simulating with ${engine.name}…` }));
-  if (st.doc.profile.param.enabled) {
-    const run = await runParametric(st.doc, engine, abort.signal, (i, n, label) =>
-      useStore.setState({ status: `Parametric run ${i} of ${n} (${label})… press Cancel to stop` }));
+  const doc = st.doc;
+  const { ctx, abort } = beginRun('schematic', `Simulating with ${engine.name}…`);
+  if (doc.profile.param.enabled) {
+    const run = await runParametric(doc, engine, abort.signal, (i, n, label) => {
+      if (S().sim.runId === ctx.id) useStore.setState({ status: `Parametric run ${i} of ${n} (${label})… press Cancel to stop` });
+    });
     const failed = run.result.steps?.filter(s => !s.ok).length ?? 0;
-    finishRun(run.result, run.deck, 'schematic', run.result.steps ? [`Parametric sweep: ${run.result.steps.length} run(s)${failed ? `, ${failed} failed` : ''}`] : []);
+    finishRun(ctx, run.result, run.deck, run.result.steps ? [`Parametric sweep: ${run.result.steps.length} run(s)${failed ? `, ${failed} failed` : ''}`] : []);
     return;
   }
-  const run = await runSchematic(st.doc, engine, abort.signal);
-  finishRun(run.result, run.deck, 'schematic', []);
+  const run = await runSchematic(doc, engine, abort.signal);
+  finishRun(ctx, run.result, run.deck, []);
 }
 
 export async function simulateNetlist() {
   const st = S();
   if (st.sim.running) return;
-  const abort = new AbortController();
-  useStore.setState(s => ({ sim: { ...s.sim, running: true, abort }, status: `Simulating netlist with ${engine.name}…` }));
-  const run = await runDeck(st.cir.text, engine, abort.signal, (i, n, label) => useStore.setState({ status: `.STEP run ${i} of ${n} (${label})…` }));
-  useStore.setState({ cirMeasures: run.measurements, cirProbes: run.probes });
-  finishRun(run.result, run.deck, 'netlist', run.notes);
+  const text = st.cir.text;
+  const { ctx, abort } = beginRun('netlist', `Simulating netlist with ${engine.name}…`);
+  const run = await runDeck(text, engine, abort.signal, (i, n, label) => {
+    if (S().sim.runId === ctx.id) useStore.setState({ status: `.STEP run ${i} of ${n} (${label})…` });
+  });
+  if (finishRun(ctx, run.result, run.deck, run.notes)) useStore.setState({ cirMeasures: run.measurements, cirProbes: run.probes });
 }
 
 // ---- Netlist Mode (.cir) ----
@@ -160,7 +194,8 @@ export function setCirText(text: string, forceStep = false) {
     const past = group ? s.cirHist.past : [...s.cirHist.past.slice(-300), s.cir.text];
     return {
       cir: { ...s.cir, text, dirty: true, origin: s.cir.origin === 'generated' ? 'edited' : s.cir.origin },
-      cirHist: { past, future: [], lastAt: now },
+      cirHist: { past, future: [], lastAt: now }, cirRev: s.cirRev + 1,
+      sim: { ...s.sim, stale: isStale(s.sim, s.doc, text) },
     };
   });
   saveCirDraft(text);
@@ -168,15 +203,20 @@ export function setCirText(text: string, forceStep = false) {
 export function cirUndo() {
   const { cirHist: h, cir } = S();
   if (!h.past.length) return;
-  useStore.setState({ cir: { ...cir, text: h.past[h.past.length - 1], dirty: true }, cirHist: { past: h.past.slice(0, -1), future: [cir.text, ...h.future], lastAt: 0 } });
+  const text = h.past[h.past.length - 1];
+  useStore.setState(s => ({ cir: { ...cir, text, dirty: true }, cirHist: { past: h.past.slice(0, -1), future: [cir.text, ...h.future], lastAt: 0 },
+    cirRev: s.cirRev + 1, sim: { ...s.sim, stale: isStale(s.sim, s.doc, text) } }));
 }
 export function cirRedo() {
   const { cirHist: h, cir } = S();
   if (!h.future.length) return;
-  useStore.setState({ cir: { ...cir, text: h.future[0], dirty: true }, cirHist: { past: [...h.past, cir.text], future: h.future.slice(1), lastAt: 0 } });
+  const text = h.future[0];
+  useStore.setState(s => ({ cir: { ...cir, text, dirty: true }, cirHist: { past: [...h.past, cir.text], future: h.future.slice(1), lastAt: 0 },
+    cirRev: s.cirRev + 1, sim: { ...s.sim, stale: isStale(s.sim, s.doc, text) } }));
 }
 const loadCir = (text: string, fileName: string | null, origin: CirDoc['origin']) => {
-  useStore.setState({ cir: { text, fileName, dirty: false, origin }, cirHist: { past: [], future: [], lastAt: 0 }, mainView: 'netlist', cirTraces: null });
+  useStore.setState(s => ({ cir: { text, fileName, dirty: false, origin }, cirHist: { past: [], future: [], lastAt: 0 }, mainView: 'netlist', cirTraces: null,
+    cirSession: s.cirSession + 1, cirRev: 0, sim: replacedSim(s.sim, 'netlist') }));
   saveCirDraft(text);
 };
 const confirmCir = () => !S().cir.dirty || window.confirm('Discard unsaved changes to the current netlist?');
@@ -194,21 +234,29 @@ export function openCir() {
   };
   input.click();
 }
-let cirHandle: any = null;
 export async function saveCir(as = false) {
-  const { cir } = S();
+  const { cir, cirSession: session, cirRev: rev } = S();
   const w = window as any;
+  const done = (name: string, how = '') => {
+    if (S().cirSession !== session) return;
+    const edited = S().cirRev !== rev;
+    useStore.setState(s => ({ cir: { ...s.cir, fileName: name, dirty: edited }, status: edited ? `Saved ${name}${how} — changes made during the save are not saved yet` : `Saved ${name}${how}` }));
+  };
   try {
     if (w.showSaveFilePicker) {
-      if (as || !cirHandle) cirHandle = await w.showSaveFilePicker({ suggestedName: cir.fileName ?? 'circuit.cir', types: [{ description: 'SPICE netlist', accept: { 'text/plain': ['.cir', '.sp', '.spice', '.net', '.txt'] } }] });
-      const wr = await cirHandle.createWritable(); await wr.write(cir.text); await wr.close();
-      useStore.setState(s => ({ cir: { ...s.cir, fileName: cirHandle.name, dirty: false }, status: `Saved ${cirHandle.name}` }));
+      let h = handles.cir?.session === session ? handles.cir.h : null;
+      if (as || !h) {
+        h = await w.showSaveFilePicker({ suggestedName: cir.fileName ?? 'circuit.cir', types: [{ description: 'SPICE netlist', accept: { 'text/plain': ['.cir', '.sp', '.spice', '.net', '.txt'] } }] });
+        handles.cir = { session, h };
+      }
+      const wr = await h.createWritable(); await wr.write(cir.text); await wr.close();
+      done(h.name);
     } else {
       const name = as || !cir.fileName ? prompt('Save netlist as:', cir.fileName ?? 'circuit.cir') : cir.fileName;
       if (!name) return;
       const fn = /\.\w+$/.test(name) ? name : name + '.cir';
       download(fn, cir.text);
-      useStore.setState(s => ({ cir: { ...s.cir, fileName: fn, dirty: false }, status: `Saved ${fn} (downloaded)` }));
+      done(fn, ' (downloaded)');
     }
   } catch (e) { if ((e as Error).name !== 'AbortError') alert(`Save failed: ${(e as Error).message}`); }
 }

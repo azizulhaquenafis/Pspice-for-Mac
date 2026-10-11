@@ -1,4 +1,25 @@
 # Changelog
+## 0.5.2 — 2026-10-11
+- New: Transient Print Step auto-fix. 0 / negative, larger than Final Time, or far too fine (> 100,000 points per
+  run, e.g. 1 ns or 1 ps for 1 ms) becomes a 1-2-5 value near Final Time / 1000 (1 ms → 1 µs); a Print Step that
+  would overflow 200,000 stored points across a sweep is raised to the finest 1-2-5 value that fits. Each fix is
+  shown as a warning/note. Applies to the schematic Transient dialog and to .TRAN in Netlist Mode.
+- Fixes from the external review (B01–B15):
+  - B01 Save after New/Open no longer overwrites the previous document's file (file handles are per document session).
+  - B02 Creating a netlist preview no longer replaces the deck paired with the shown result.
+  - B03 Undo/redo and .cir edits mark results stale exactly when the simulated circuit differs.
+  - B04 New/Open cancel an in-flight run; late results from an old run or document are discarded (run IDs).
+  - B05 Copy/Cut/Paste keep junctions and markers; current/power markers follow their pasted part.
+  - B06 A net alias spelled like an automatic node name (e.g. n0001) no longer merges with an unlabelled net.
+  - B07 A current marker on an F/H control pin (C+/C−) plots the control current.
+  - B08 Netlist Mode honours IC={expression} using top-level .PARAM values; unevaluable ICs are errors.
+  - B09 SIN/COS of complex (AC) values use the complex identities.
+  - B10 Opening a .osch validates every object (ids, coordinates, properties, markers, view) before replacing the document.
+  - B11 Probe axis dialog shows 1 MHz as 1Meg (it parsed back as 1 mHz).
+  - B12 Log axis decade generation is bounded and empty for non-positive ranges.
+  - B13 An edit made while a save is being written stays marked unsaved.
+  - B14 CSV export writes every point of the visible traces (no truncation to the first axis length).
+  - B15 A run cancelled before it starts does no work on any backend; abort listeners are removed per pass.
 ## 0.5.1 — 2026-10-11
 - New: File ▸ Import PSpice Schematic (.sch) (also accepted by File ▸ Open). Reads MicroSim/PSpice Schematics
   8–9.1 text files: parts and ports with attributes (REFDES, VALUE, DC, source/switch/gain/IC parameters),

@@ -17,6 +17,7 @@ export class WasmNgspiceEngine implements SimulationEngine {
   run(netlist: string, signal?: AbortSignal): Promise<SimResult> {
     const t0 = performance.now();
     const fail = (msg: string): SimResult => ({ ok: false, plots: [], log: '', errors: [msg], elapsedMs: performance.now() - t0 });
+    if (signal?.aborted) return Promise.resolve(fail('Simulation cancelled'));
     return new Promise(resolve => {
       let w: Worker;
       try { w = this.getWorker(); } catch (e) { resolve(fail(`Cannot start the WebAssembly simulator: ${(e as Error).message}`)); return; }

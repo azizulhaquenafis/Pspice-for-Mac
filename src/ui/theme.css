@@ -146,6 +146,10 @@ fieldset { border: 1px solid; border-color: var(--face-shadow) var(--face-light)
 .li { padding: 1px 4px; cursor: default; }
 .li:hover { background: #e8e8f8; }
 .li.on { background: var(--menu-hl); color: #fff; }
+.li-group { padding: 2px 4px 0; font-weight: bold; color: #444; border-top: 1px solid #ddd; background: #f4f4f4; }
+.attr-group { font-weight: bold; padding-top: 6px; border-top: 1px solid var(--face-shadow); }
+.preview .pin-name { font-size: 6px; fill: #808080; }
+.bad-t { color: #c00000; }
 .pb { display: flex; gap: 10px; margin-top: 6px; }
 .pb-preview { flex: 1; display: flex; flex-direction: column; align-items: center; }
 .preview { background: #fff; border: 1px solid var(--face-shadow); }

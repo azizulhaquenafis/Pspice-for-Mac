@@ -4,13 +4,25 @@ import { useStore } from '../state/store';
 import { download } from '../state/actions';
 import { formatEng, parseSpiceNumber } from '../core/units';
 import { linearTicks, formatTicks, formatPrecise } from './axis';
-import { AcMode, Trace, availableTraces, evalForDisplay, markerExprs, traceColor, xAxis } from './probeModel';
+import { AcMode, Trace, availableTraces, evalForDisplay, markerExprs, traceColor, tracesCSV, xAxis } from './probeModel';
 import { parseDeckDevices, evaluateExpr } from '../sim/expr';
 import { Plot, SimStep } from '../sim/types';
 import { SectionInfoDialog, TracePropDialog, MeasureDialog, ContextMenu, MenuItem, TraceStyle, SYMBOLS, drawSymbol } from './ProbeDialogs';
 import { measure } from '../sim/measure';
 
 interface Range { x0: number; x1: number; y0: number; y1: number }
+/** Decade exponents covering [a, b] on a log axis — bounded: non-positive or non-finite bounds give none (B12). */
+export function decades(a: number, b: number): number[] {
+  if (!(a > 0) || !(b > a) || !isFinite(a) || !isFinite(b)) return [];
+  const d0 = Math.floor(Math.log10(a)), d1 = Math.ceil(Math.log10(b));
+  const out: number[] = [];
+  for (let d = d0; d <= d1 && out.length < 60; d++) out.push(d);
+  return out;
+}
+/** Number for an input field that parses back to the same value: "Meg" for 1e6 (SPICE reads "M" as milli), "u" for µ (B11). */
+export function axisInput(v: number, resolution: number): string {
+  return formatPrecise(v, resolution).replace(/µ/, 'u').replace(/M$/, 'Meg');
+}
 function interp(xs: Float64Array, y: Float64Array, x: number) {
   let lo = 0, hi = xs.length - 1;
   if (x <= xs[0]) return y[0];
@@ -141,7 +153,7 @@ export function Probe() {
     // X ticks: precision-aware labels; reduce tick count until labels do not overlap.
     let xt: number[] = [], xl: string[] = [];
     if (log) {
-      for (let d = Math.floor(Math.log10(R.x0)); d <= Math.ceil(Math.log10(R.x1)); d++) { const v = Math.pow(10, d); if (v >= R.x0 * 0.999 && v <= R.x1 * 1.001) xt.push(v); }
+      for (const d of decades(R.x0, R.x1)) { const v = Math.pow(10, d); if (v >= R.x0 * 0.999 && v <= R.x1 * 1.001) xt.push(v); }
       xl = xt.map(v => formatEng(v, 3, xUnit));
     } else {
       for (let target = Math.max(2, Math.floor(pw / 70)); target >= 2; target--) {
@@ -154,7 +166,7 @@ export function Probe() {
     }
     g.textAlign = 'center';
     xt.forEach((v, i) => { const X = Math.round(sx(v)) + 0.5; g.beginPath(); g.moveTo(X, M.t); g.lineTo(X, M.t + ph); g.stroke(); const hw = g.measureText(xl[i]).width / 2; g.fillText(xl[i], Math.min(Math.max(X, hw + 2), size.w - hw - 2), M.t + ph + 14); });
-    if (log) for (let d = Math.floor(Math.log10(R.x0)); d <= Math.ceil(Math.log10(R.x1)); d++) for (let k = 2; k < 10; k++) {
+    if (log) for (const d of decades(R.x0, R.x1)) for (let k = 2; k < 10; k++) {
       const v = k * Math.pow(10, d); if (v < R.x0 || v > R.x1) continue; const X = Math.round(sx(v)) + 0.5; g.globalAlpha = 0.4; g.beginPath(); g.moveTo(X, M.t); g.lineTo(X, M.t + ph); g.stroke(); g.globalAlpha = 1;
     }
     // dotted minor grid between major x ticks (linear axes)
@@ -316,18 +328,8 @@ export function Probe() {
   };
   const exportPNG = () => cvs.current?.toBlob(b => b && download(`${doc.title}-${plot.kind}.png`, b));
   const exportCSV = () => {
-    const shared = visible.every(t => t.x === visible[0]?.x);
-    const q = (s: string) => (/[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-    const rows: string[] = [];
-    if (shared) {
-      rows.push([ax.label, ...visible.map(t => t.label)].map(q).join(','));
-      for (let i = 0; i < ax.x.length; i++) rows.push([visible[0]?.x[i] ?? ax.x[i], ...visible.map(t => t.y[i])].map(v => v.toPrecision(12)).join(','));
-    } else { // parametric runs have different time points: x/y column pairs
-      rows.push(visible.flatMap(t => [`${ax.label} [${t.label}]`, t.label]).map(q).join(','));
-      const n = Math.max(...visible.map(t => t.x.length));
-      for (let i = 0; i < n; i++) rows.push(visible.flatMap(t => i < t.x.length ? [t.x[i].toPrecision(12), t.y[i].toPrecision(12)] : ['', '']).join(','));
-    }
-    download(`${doc.title}-${plot.kind}.csv`, rows.join('\n') + '\n', 'text/csv');
+    if (!visible.length) { useStore.getState().setStatus('No visible traces to export'); return; }
+    download(`${doc.title}-${plot.kind}.csv`, tracesCSV(ax.label, visible), 'text/csv');
   };
 
   const MENUS: [string, [string, (() => void) | null, boolean?][]][] = [
@@ -441,7 +443,7 @@ export function Probe() {
         <TracePropDialog t={{ ...t, step: t.stepObj, shown: t.x.length }} style={styles[t.key] ?? {}} onClose={() => setPropKey(null)}
           onOK={st => { setStyles(m => ({ ...m, [t.key]: st })); setPropKey(null); }} />); })()}
       {measureFor !== undefined && <MeasureDialog traces={visible.map(t => ({ ...t, step: t.stepObj, color: colorOf(t), shown: t.x.length }))} initialExpr={measureFor ?? undefined} onClose={() => setMeasureFor(undefined)} />}
-      {axisOpen && <AxisDialog r={R} unit={xUnit} onClose={() => setAxisOpen(false)} onOK={r => { setRange(r); setAxisOpen(false); }} />}
+      {axisOpen && <AxisDialog r={R} unit={xUnit} log={log} onClose={() => setAxisOpen(false)} onOK={r => { setRange(r); setAxisOpen(false); }} />}
       {addOpen && (
         <AddTraceDialog plot={plot} devices={devices} initial={addOpen.edit ?? ''} editing={!!addOpen.edit}
           onClose={() => setAddOpen(null)}
@@ -455,11 +457,11 @@ export function Probe() {
 }
 
 /** Plot ▸ Axis Settings: exact x and y ranges (SPICE suffixes accepted). */
-function AxisDialog({ r, unit, onOK, onClose }: { r: Range; unit: string; onOK: (r: Range) => void; onClose: () => void }) {
-  const f = (v: number) => formatPrecise(v, Math.abs(r.x1 - r.x0) / 1e6).replace(/µ/, 'u');
+function AxisDialog({ r, unit, log, onOK, onClose }: { r: Range; unit: string; log: boolean; onOK: (r: Range) => void; onClose: () => void }) {
+  const f = (v: number) => axisInput(v, Math.abs(r.x1 - r.x0) / 1e6);
   const [v, setV] = useState({ x0: f(r.x0), x1: f(r.x1), y0: formatEng(r.y0, 6), y1: formatEng(r.y1, 6) });
   const p = Object.fromEntries(Object.entries(v).map(([k, s]) => [k, parseSpiceNumber(s.replace(new RegExp(`${unit}$`), ''))]));
-  const ok = Object.values(p).every(x => x.ok) && p.x1.value > p.x0.value && p.y1.value > p.y0.value;
+  const ok = Object.values(p).every(x => x.ok && isFinite(x.value)) && p.x1.value > p.x0.value && p.y1.value > p.y0.value && (!log || p.x0.value > 0);
   return (
     <div className="modal-back" onMouseDown={onClose}>
       <div className="dialog" role="dialog" aria-label="Axis Settings" style={{ width: 320 }} onMouseDown={e => e.stopPropagation()}>
@@ -473,7 +475,7 @@ function AxisDialog({ r, unit, onOK, onClose }: { r: Range; unit: string; onOK: 
             <div className="row"><label>From:</label><input value={v.y0} onChange={e => setV({ ...v, y0: e.target.value })} /></div>
             <div className="row"><label>To:</label><input value={v.y1} onChange={e => setV({ ...v, y1: e.target.value })} /></div>
           </fieldset>
-          {!ok && <div className="trace-err">Enter valid numbers with From &lt; To (e.g. 2.199m)</div>}
+          {!ok && <div className="trace-err">Enter valid numbers with From &lt; To (e.g. 2.199m){log ? '; the logarithmic X axis needs From > 0' : ''}</div>}
         </div>
         <div className="dlg-buttons"><button className="default" disabled={!ok} onClick={() => onOK({ x0: p.x0.value, x1: p.x1.value, y0: p.y0.value, y1: p.y1.value })}>OK</button><button onClick={onClose}>Cancel</button></div>
       </div>

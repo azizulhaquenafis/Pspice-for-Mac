@@ -80,7 +80,7 @@ export function translateDeck(input: string): Translated {
     if (plan.error) errors.push(`Line ${tran.n}: ${plan.error}`);
     else {
       plan.notes.forEach(x => notes.push(`Line ${tran!.n}: ${x}`));
-      out[tran.idx] = `.tran ${spiceNum(ps)} ${spiceNum(tf)} ${spiceNum(t0)} ${spiceNum(plan.tmax)}${tran.uic ? ' UIC' : ''}`;
+      out[tran.idx] = `.tran ${spiceNum(plan.tstep)} ${spiceNum(tf)} ${spiceNum(t0)} ${spiceNum(plan.tmax)}${tran.uic ? ' UIC' : ''}`;
       if (plan.interp) out.splice(1, 0, '.option interp');
     }
   }

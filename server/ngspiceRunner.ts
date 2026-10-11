@@ -29,6 +29,7 @@ export function buildDecks(netlist: string): { decks: string[]; errors: string[]
 
 export async function runNgspice(netlist: string, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<RunOutput> {
   const t0 = Date.now();
+  if (opts.signal?.aborted) return { raw: '', log: '', errors: ['Simulation cancelled'], ok: false, elapsedMs: 0 };
   const { decks, errors } = buildDecks(netlist);
   if (errors.length) return { raw: '', log: '', errors, ok: false, elapsedMs: 0 };
   const dir = await mkdtemp(join(tmpdir(), 'ospice-'));
@@ -37,6 +38,7 @@ export async function runNgspice(netlist: string, opts: { timeoutMs?: number; si
   try {
     let log = '';
     for (const deck of decks) {
+      if (opts.signal?.aborted) throw new Error('Simulation cancelled');
     await writeFile(cir, deck.replace(/__OUT__/g, out));
     log += await new Promise<string>((resolve, reject) => {
       const child = spawn(NGSPICE_BIN, ['-b', cir], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -45,7 +47,9 @@ export async function runNgspice(netlist: string, opts: { timeoutMs?: number; si
       child.stderr.on('data', d => (buf += d));
       const kill = (why: string) => { child.kill('SIGKILL'); reject(new Error(why)); };
       const timer = setTimeout(() => kill(`Simulation timed out after ${(opts.timeoutMs ?? 30000) / 1000}s`), opts.timeoutMs ?? 30000);
-      opts.signal?.addEventListener('abort', () => kill('Simulation cancelled'));
+      const onAbort = () => kill('Simulation cancelled');
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
+      child.on('close', () => opts.signal?.removeEventListener('abort', onAbort));
       child.on('error', e => { clearTimeout(timer); reject(new Error(`Cannot start ngspice (${NGSPICE_BIN}): ${e.message}`)); });
       child.on('close', () => { clearTimeout(timer); resolve(buf); });
     });

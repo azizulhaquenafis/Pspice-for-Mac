@@ -35,6 +35,8 @@ export class AutoEngine implements SimulationEngine {
 
   async run(netlist: string, signal?: AbortSignal): Promise<SimResult> {
     const e = await this.choose();
+    // cancelled while the backend was being chosen
+    if (signal?.aborted) return { ok: false, plots: [], log: '', errors: ['Simulation cancelled'], elapsedMs: 0 };
     try {
       return await e.run(netlist, signal);
     } catch (err) {

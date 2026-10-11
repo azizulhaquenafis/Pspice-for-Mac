@@ -10,6 +10,7 @@
 | Editor | Junction dots (T / 3+ connections); crossing wires stay separate; explicit junction tool | ✅ (Test G) |
 | Editor | Net alias labels (double-click wire), text annotations | ✅ |
 | Editor | Select, shift-select, rubber-band, move with rubber-banding wires, delete | ✅ |
+| Editor | Copy/Cut/Paste incl. junctions and markers (current/power markers follow their part) | ✅ (review B05 test) |
 | Editor | Undo/redo all edits; cut/copy/paste | ✅ |
 | Editor | Net highlight on wire click | ✅ |
 | Editor | Zoom in/out/fit/selection/page, wheel pan, pinch/ctrl-wheel zoom | ✅ |
@@ -33,6 +34,7 @@
 | Netlist Mode | Whole-app mode switch (button, Ctrl+1/2), own menus/toolbar/status, SPICE highlighting, find/replace, undo/redo, Messages/Log, bias listing | ✅ |
 | Netlist Mode | PSpice Sw_tOpen/Sw_tClose X-instances (PARAMS: tOpen/tClose, ttran, Rclosed, Ropen); .PROBE signals → Probe traces | ✅ (tran-step tests) |
 | Sim | TMAX omitted/0 = automatic, invalid rejected, per-run and across-sweep workload limits with suggestions, output interpolation | ✅ (tran-step tests) |
+| Sim | Print Step auto-fix (0, > Final Time, absurdly fine, or over the sweep output budget → 1-2-5 value, with a note) | ✅ (tran-step tests, real ngspice) |
 | Netlist Mode | .STEP PARAM/TEMP (independent runs), .MEAS results, .SAVE, error line mapping, 8 examples, .cir/.sp/.spice/.net/.txt | ✅ (netlist-mode tests) |
 | Netlist Mode | Generated / edited / independent provenance; netlist saved inside .osch | ✅ |
 | Netlist Mode | .LIB/.INC files, .FOUR, .TF, .SENS, .NOISE, .STEP of sources/models | ⛔ (reported as errors) |

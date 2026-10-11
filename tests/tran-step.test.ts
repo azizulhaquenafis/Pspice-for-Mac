@@ -43,20 +43,31 @@ describe('TMAX (step ceiling) handling', () => {
     expect(p.error).toBeUndefined(); expect(p.tmax).toBe(0.1e-6); expect(p.interp).toBe(true);
     expect(planTran(1e-6, 4e-3, 0, 20e-6, 21).interp).toBe(false); // ordinary settings unchanged
   });
-  it('invalid TMAX / TSTEP / TSTART are rejected with an explanation', () => {
+  it('invalid TMAX / TSTART / TSTOP are rejected with an explanation', () => {
     expect(planTran(1e-6, 4e-3, 0, -1e-6).error).toMatch(/Step Ceiling .* invalid/);
-    expect(planTran(0, 4e-3, 0, undefined).error).toMatch(/Print Step/);
     expect(planTran(1e-6, 0, 0, undefined).error).toMatch(/Final Time/);
     expect(planTran(1e-6, 4e-3, 5e-3, undefined).error).toMatch(/No-Print Delay/);
-    expect(planTran(1e-3, 1e-6, 0, undefined).error).toMatch(/larger than Final Time/);
+  });
+  it('Print Step auto-fix (user request 2026-10-11): 0, > Final Time, or ns/ps for a ms run becomes ~TSTOP/1000 on the 1-2-5 series', () => {
+    for (const bad of [0, -1e-6, 1e-9, 1e-12]) {
+      const p = planTran(bad, 1e-3, 0, undefined);
+      expect(p.error).toBeUndefined(); expect(p.tstep).toBeCloseTo(1e-6, 18); expect(p.stepFix).toMatch(/Print Step .* using 1(\.0+)?us/);
+    }
+    const big = planTran(1e-3, 1e-6, 0, undefined);
+    expect(big.error).toBeUndefined(); expect(big.tstep).toBeCloseTo(1e-9, 20); expect(big.stepFix).toMatch(/larger than Final Time/);
+    expect(planTran(4e-6, 4e-3, 0, undefined).tstep).toBe(4e-6);       // sensible steps are kept as given
+    expect(planTran(4e-6, 4e-3, 0, undefined).stepFix).toBeUndefined();
+    expect(planTran(1e-8, 4e-3, 0, undefined).tstep).toBeCloseTo(5e-6, 18); // 4 µs rounded up to 5 µs
   });
   it('limits say per run vs across the sweep and suggest a valid setting', () => {
     const perRun = planTran(1e-6, 4e-3, 0, 1e-10).error!;
     expect(perRun).toMatch(/per run/); expect(perRun).toMatch(/at least 2(\.0+)?ns/);
-    const sweep = planTran(0.1e-6, 4e-3, 0, 0.1e-6, 21).error!;
-    expect(sweep).toMatch(/across the sweep \(21 runs/); expect(sweep).toMatch(/Print Step of at least/);
-    const single = planTran(0.01e-6, 4e-3, 0, 0.01e-6, 1).error!;
-    expect(single).toMatch(/for this run/);
+    // a Print Step that overflows the output budget across a sweep is raised to the finest 1-2-5 value that fits
+    const sweep = planTran(0.1e-6, 4e-3, 0, 0.1e-6, 21);
+    expect(sweep.error).toBeUndefined(); expect(sweep.stepFix).toMatch(/across 21 runs/);
+    expect(sweep.tstep).toBeCloseTo(0.5e-6, 18); expect((21 * 4e-3) / sweep.tstep).toBeLessThanOrEqual(MAX_OUTPUT_POINTS);
+    const single = planTran(0.01e-6, 4e-3, 0, 0.01e-6, 1);
+    expect(single.error).toBeUndefined(); expect(single.tstep).toBeCloseTo(5e-6, 18); expect(single.interp).toBe(true);
     expect(MAX_OUTPUT_POINTS).toBe(200000);
   });
   it('translator: .tran 1us 4ms 0ms 0 UIC with 21 .STEP runs is accepted', () => {
@@ -121,5 +132,24 @@ describe("user's switched-RL deck (.STEP param Rh 70 80 0.5, 21 runs)", () => {
 describe('.PROBE signals', () => {
   it('keeps the sign of -I(L1) and multiple signals', () => {
     expect(translateDeck('t\nR1 1 0 1\nV1 1 0 1\nL1 1 0 1\n.tran 1m 1\n.probe -I(L1) V(1)\n.end\n').probes).toEqual(['-I(L1)', 'V(1)']);
+  });
+  it('schematic: Print Step 0 / 1ps is auto-fixed in the generated deck with a warning', () => {
+    for (const ps of ['0', '1ps', '1ns']) {
+      const b = divider();
+      b.doc.profile.tran = { enabled: true, printStep: ps, finalTime: '1ms', noPrint: '0', stepCeiling: '', uic: false };
+      const nl = generateNetlist(b.doc);
+      expect(nl.ok).toBe(true);
+      expect(nl.text).toMatch(tranLine(1e-6, 1e-3, 0, 5e-6));
+      expect(nl.diagnostics.some(d => d.level === 'warning' && /Print Step .* using/.test(d.message))).toBe(true);
+    }
+  });
+  it('netlist mode: .tran 0 1ms runs on real ngspice with the fixed Print Step', async () => {
+    const run = await runDeck('rc\nV1 IN 0 PULSE(0 1 0 1n 1n 10 20)\nR1 IN OUT 1k\nC1 OUT 0 100n\n.tran 0 1ms\n.end\n', engine);
+    expect(run.result.ok).toBe(true);
+    expect(run.deck).toMatch(tranLine(1e-6, 1e-3, 0, 5e-6));
+    expect(run.notes.join()).toMatch(/Print Step .* using 1(\.0+)?us/);
+    const p = run.result.plots.find(p => p.kind === 'tran')!;
+    const t = p.vectors[0].re, y = p.vectors.find(v => v.name.toLowerCase() === 'v(out)')!.re;
+    expect(at(t, y, 1e-3)).toBeCloseTo(1 - Math.exp(-10), 3);
   });
 });

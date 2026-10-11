@@ -1,7 +1,7 @@
 // Application state. Every document mutation goes through `commit`, which
 // records an undo snapshot (documents are immutable, so snapshots share structure).
 import { create } from 'zustand';
-import { SchematicDoc, emptyDoc, Part, Wire, Pt, Rot, newId, Label, Marker } from '../core/model';
+import { SchematicDoc, emptyDoc, Part, Wire, Pt, Rot, newId, Label, Marker, Junction } from '../core/model';
 import { getDef, defaultProps, pinPositions } from '../core/library';
 import { onWire } from '../core/connectivity';
 import { insertPins, mergeCollinear, ptKey } from '../core/wires';
@@ -25,6 +25,29 @@ export type Dialog =
 export interface Selection { parts: string[]; wires: string[]; labels: string[]; junctions: string[]; markers: string[] }
 const emptySel = (): Selection => ({ parts: [], wires: [], labels: [], junctions: [], markers: [] });
 
+export interface SimState {
+  running: boolean; result: SimResult | null; netlist: string; abort?: AbortController; stale: boolean;
+  source: 'schematic' | 'netlist'; notes: string[];
+  sig?: string; cirText?: string; runId?: number; runKind?: 'schematic' | 'netlist';
+}
+export const emptySim = (): SimState => ({ running: false, result: null, netlist: '', stale: true, source: 'schematic', notes: [] });
+
+/** Everything that affects the simulated circuit (not label positions, markers, probe traces or the view). */
+export function circuitSignature(d: SchematicDoc): string {
+  return JSON.stringify([
+    d.parts.map(p => [p.id, p.type, p.ref, p.x, p.y, p.rot, p.mirror, p.props]),
+    d.wires.map(w => [w.a.x, w.a.y, w.b.x, w.b.y]),
+    d.junctions.map(j => [j.x, j.y]),
+    d.labels.filter(l => l.kind === 'alias').map(l => [l.x, l.y, l.text]),
+    d.profile,
+  ]);
+}
+/** Is the last result out of date for the document / netlist now being edited? */
+export function isStale(sim: SimState, doc: SchematicDoc, cirText: string): boolean {
+  if (!sim.result) return true;
+  return sim.source === 'netlist' ? sim.cirText !== cirText : sim.sig !== circuitSignature(doc);
+}
+
 interface State {
   doc: SchematicDoc;
   past: SchematicDoc[];
@@ -37,7 +60,13 @@ interface State {
   status: string;
   cursor: Pt;
   recentParts: string[];
-  sim: { running: boolean; result: SimResult | null; netlist: string; abort?: AbortController; stale: boolean; source: 'schematic' | 'netlist'; notes: string[] };
+  /** Last simulation. `netlist` is the deck that was actually executed (never a preview); `sig`/`cirText` record
+   *  what was simulated so `stale` can be recomputed exactly; `runId` identifies the run in flight. */
+  sim: SimState;
+  /** Schematic document identity (new on New/Open/Import/example/recovery) and edit revision. */
+  docSession: number; docRev: number;
+  /** Netlist-editor document identity and edit revision. */
+  cirSession: number; cirRev: number;
   /** Which document the main area shows: the schematic or the text netlist editor. */
   mainView: 'schematic' | 'netlist';
   cir: CirDoc;
@@ -79,6 +108,14 @@ interface State {
 }
 
 const MAX_UNDO = 200;
+
+/** A document of the given kind was replaced: cancel a run in flight for it and drop its results
+ *  (results of the other kind — e.g. a netlist run when the schematic is replaced — are kept). */
+export function replacedSim(sim: SimState, kind: 'schematic' | 'netlist'): SimState {
+  if (sim.running && sim.runKind === kind) { sim.abort?.abort(); return emptySim(); }
+  if (sim.running) return sim;
+  return sim.source === kind ? emptySim() : sim;
+}
 
 function nextRef(doc: SchematicDoc, prefix: string): string {
   if (!prefix) return '';
@@ -126,7 +163,8 @@ export const useStore = create<State>((set, get) => ({
   status: 'Ready',
   cursor: { x: 0, y: 0 },
   recentParts: ['R', 'C', 'L', 'VDC', 'AGND'],
-  sim: { running: false, result: null, netlist: '', stale: true, source: 'schematic', notes: [] },
+  sim: emptySim(),
+  docSession: 1, docRev: 0, cirSession: 1, cirRev: 0,
   showBiasV: false, showBiasI: false,
   mainView: 'schematic',
   cir: { text: readCir() ?? DEFAULT_CIR, fileName: null, dirty: false, origin: 'independent' },
@@ -143,23 +181,29 @@ export const useStore = create<State>((set, get) => ({
     const { doc, past } = get();
     const next = fn(doc);
     if (next === doc) return;
-    set({ doc: next, past: [...past.slice(-MAX_UNDO), doc], future: [], dirty: true, sim: { ...get().sim, stale: true }, ...(msg ? { status: msg } : {}) });
+    const s = get();
+    set({ doc: next, past: [...past.slice(-MAX_UNDO), doc], future: [], dirty: true, docRev: s.docRev + 1,
+      sim: { ...s.sim, stale: isStale(s.sim, next, s.cir.text) }, ...(msg ? { status: msg } : {}) });
   },
   commitView(fn, msg) {
     const { doc, past } = get();
     const next = fn(doc);
     if (next === doc) return;
-    set({ doc: next, past: [...past.slice(-MAX_UNDO), doc], future: [], dirty: true, ...(msg ? { status: msg } : {}) });
+    set({ doc: next, past: [...past.slice(-MAX_UNDO), doc], future: [], dirty: true, docRev: get().docRev + 1, ...(msg ? { status: msg } : {}) });
   },
   undo() {
     const { past, doc, future } = get();
     if (!past.length) return set({ status: 'Nothing to undo' });
-    set({ doc: past[past.length - 1], past: past.slice(0, -1), future: [doc, ...future], sel: emptySel(), dirty: true, status: 'Undo' });
+    const s = get(), next = past[past.length - 1];
+    set({ doc: next, past: past.slice(0, -1), future: [doc, ...future], sel: emptySel(), dirty: true, docRev: s.docRev + 1,
+      sim: { ...s.sim, stale: isStale(s.sim, next, s.cir.text) }, status: 'Undo' });
   },
   redo() {
     const { past, doc, future } = get();
     if (!future.length) return set({ status: 'Nothing to redo' });
-    set({ doc: future[0], future: future.slice(1), past: [...past, doc], sel: emptySel(), dirty: true, status: 'Redo' });
+    const s = get(), next = future[0];
+    set({ doc: next, future: future.slice(1), past: [...past, doc], sel: emptySel(), dirty: true, docRev: s.docRev + 1,
+      sim: { ...s.sim, stale: isStale(s.sim, next, s.cir.text) }, status: 'Redo' });
   },
   setTool(t) {
     const msg: Record<string, string> = {
@@ -256,36 +300,53 @@ export const useStore = create<State>((set, get) => ({
   },
   copy() {
     const { sel, doc } = get();
-    const data = { parts: doc.parts.filter(p => sel.parts.includes(p.id)), wires: doc.wires.filter(w => sel.wires.includes(w.id)), labels: doc.labels.filter(l => sel.labels.includes(l.id)) };
-    set({ clipboard: JSON.stringify(data), status: `Copied ${data.parts.length + data.wires.length + data.labels.length} object(s)` });
+    // junctions and markers travel with the copy; a current/power marker only with its part (B05)
+    const data = {
+      parts: doc.parts.filter(p => sel.parts.includes(p.id)), wires: doc.wires.filter(w => sel.wires.includes(w.id)),
+      labels: doc.labels.filter(l => sel.labels.includes(l.id)), junctions: doc.junctions.filter(j => sel.junctions.includes(j.id)),
+      markers: doc.markers.filter(m => m.partId ? sel.parts.includes(m.partId) : sel.markers.includes(m.id)),
+    };
+    const n = data.parts.length + data.wires.length + data.labels.length + data.junctions.length + data.markers.length;
+    set({ clipboard: JSON.stringify(data), status: `Copied ${n} object(s)` });
   },
   cut() { get().copy(); get().deleteSelection(); },
   paste() {
     const cb = get().clipboard;
     if (!cb) return;
-    const data = JSON.parse(cb) as { parts: Part[]; wires: Wire[]; labels: Label[] };
+    const data = JSON.parse(cb) as { parts: Part[]; wires: Wire[]; labels: Label[]; junctions?: Junction[]; markers?: Marker[] };
     const off = 40;
     const ids: Selection = emptySel();
     get().commit(d => {
       const parts = [...d.parts];
+      const idMap = new Map<string, string>();
       for (const p of data.parts) {
         const np = { ...p, id: newId('p'), x: p.x + off, y: p.y + off, ref: nextRef({ ...d, parts }, getDef(p.type).refPrefix) };
+        idMap.set(p.id, np.id);
         parts.push(np); ids.parts.push(np.id);
       }
       const wires = data.wires.map(w => { const id = newId('w'); ids.wires.push(id); return { id, a: { x: w.a.x + off, y: w.a.y + off }, b: { x: w.b.x + off, y: w.b.y + off } }; });
       const labels = data.labels.map(l => { const id = newId('l'); ids.labels.push(id); return { ...l, id, x: l.x + off, y: l.y + off }; });
-      const nd = { ...d, parts, labels: [...d.labels, ...labels] };
+      const junctions = (data.junctions ?? []).map(j => { const id = newId('j'); ids.junctions.push(id); return { ...j, id, x: j.x + off, y: j.y + off }; });
+      const markers = (data.markers ?? []).filter(m => !m.partId || idMap.has(m.partId)).map(m => {
+        const id = newId('m'); if (!m.partId) ids.markers.push(id);
+        return { ...m, id, x: m.x + off, y: m.y + off, ...(m.partId ? { partId: idMap.get(m.partId) } : {}),
+          ...(m.x2 !== undefined ? { x2: m.x2 + off, y2: m.y2! + off } : {}) };
+      });
+      const nd = { ...d, parts, labels: [...d.labels, ...labels], junctions: [...d.junctions, ...junctions], markers: [...d.markers, ...markers] };
       return { ...nd, wires: cleanWires(nd, [...d.wires, ...wires], parts.filter(p => ids.parts.includes(p.id))) };
     }, 'Pasted');
     set({ sel: ids });
   },
   newDoc() {
-    set({ doc: emptyDoc(), past: [], future: [], dirty: false, fileName: null, sel: emptySel(), sim: { running: false, result: null, netlist: '', stale: true, source: 'schematic', notes: [] }, showBiasV: false, showBiasI: false, status: 'New schematic' });
+    set({ doc: emptyDoc(), past: [], future: [], dirty: false, fileName: null, sel: emptySel(), docSession: get().docSession + 1, docRev: 0,
+      sim: replacedSim(get().sim, 'schematic'), showBiasV: false, showBiasI: false, status: 'New schematic' });
   },
   loadText(text, name) {
-    const doc = deserialize(text);
-    if (doc.netlist) set({ cir: { ...doc.netlist, dirty: false }, cirHist: { past: [], future: [], lastAt: 0 } });
-    set({ doc, past: [], future: [], dirty: false, fileName: name, sel: emptySel(), sim: { running: false, result: null, netlist: '', stale: true, source: 'schematic', notes: [] }, showBiasV: false, showBiasI: false, status: `Opened ${name ?? 'schematic'}` });
+    const doc = deserialize(text); // throws on invalid input before anything is replaced
+    if (doc.netlist) set(s => ({ cir: { ...doc.netlist!, dirty: false }, cirHist: { past: [], future: [], lastAt: 0 }, cirSession: s.cirSession + 1, cirRev: 0,
+      sim: replacedSim(s.sim, 'netlist') }));
+    set({ doc, past: [], future: [], dirty: false, fileName: name, sel: emptySel(), docSession: get().docSession + 1, docRev: 0,
+      sim: replacedSim(get().sim, 'schematic'), showBiasV: false, showBiasI: false, status: `Opened ${name ?? 'schematic'}` });
   },
   setView(v) { set(s => ({ doc: { ...s.doc, view: v } })); },
 }));

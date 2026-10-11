@@ -3,14 +3,19 @@
 // Local coordinates in world units (grid = 10). Pin 0 is at the part origin.
 
 import { Part, Pt } from './model';
+import { dbreak, d1n4001, zener, qnpn, qpnp, mbreakN, mbreakP } from './semis';
 
 export interface PropDef {
   name: string;
   default: string;
-  kind: 'num' | 'text';
+  /** num: number / {expression}; text: free text (PWL points, PARAM names); model: .model name;
+   *  raw: further NAME=value .model parameters */
+  kind: 'num' | 'text' | 'model' | 'raw';
   unit?: string;
   optional?: boolean;   // empty value allowed (omitted from netlist)
   help?: string;
+  /** Parameter of the part's .model card (not of the device line). */
+  model?: boolean;
 }
 
 export interface TextAnchor { x: number; y: number; align: 'start' | 'middle' | 'end' }
@@ -18,7 +23,14 @@ export interface TextAnchor { x: number; y: number; align: 'start' | 'middle' | 
 export interface PartDef {
   name: string;          // library name shown in Part Browser (PSpice-like)
   description: string;
+  /** Part Browser group: Sources, Passive, Diodes, BJT, MOSFET, Switches, Other. */
   category: string;
+  /** Other names the Part Browser search and the part-name box accept (e.g. NMOS → MbreakN). */
+  aliases?: string[];
+  /** Device needs a generated .model card of this type from its `model` props. */
+  modelType?: 'D' | 'NPN' | 'PNP' | 'NMOS' | 'PMOS';
+  /** Symbol body box [x0, y0, x1, y1] in local units, for hit-testing (default: pins + a 40-wide body). */
+  body?: [number, number, number, number];
   refPrefix: string;     // reference designator prefix ("" = not annotated, e.g. ground)
   spiceLetter: string;
   pins: { name: string; x: number; y: number }[];
@@ -36,6 +48,8 @@ export interface PartDef {
   /** BUBBLE: a named connector; every BUBBLE/net alias with the same LABEL is the same net. */
   isBubble?: boolean;
   models?: string[];     // .model cards this part needs
+  /** Electrical sanity checks on the evaluated property values (messages become netlist errors). */
+  check?: (num: Record<string, number>) => string[];
   /** v: netlist text per property (number or {expression}); num: evaluated numeric values. */
   netline?: (name: string, nodes: string[], v: Record<string, string>, part: Part, num: Record<string, number>) => string;
 }
@@ -133,6 +147,12 @@ const vpulse: PartDef = {
     optDC, optAC,
   ], valueProp: 'V2',
   netline: (n, N, v) => `${n} ${N[0]} ${N[1]}${dcac(v)} PULSE(${v.V1} ${v.V2} ${v.TD} ${v.TR} ${v.TF} ${v.PW} ${v.PER})`,
+  check: x => {
+    const e = ['TD', 'TR', 'TF', 'PW', 'PER'].filter(k => x[k] < 0).map(k => `${k} must not be negative (${x[k]})`);
+    if (!e.length && x.PER > 0 && x.TR + x.PW + x.TF > x.PER * (1 + 1e-12))
+      e.push(`TR + PW + TF = ${+(x.TR + x.PW + x.TF).toPrecision(6)} s is longer than the period PER = ${x.PER} s (use PER ≥ TR + PW + TF, or PER = 0 for a single pulse)`);
+    return e;
+  },
 };
 
 const vac: PartDef = {
@@ -159,7 +179,7 @@ const vpwl: PartDef = {
 };
 
 const diode: PartDef = {
-  name: 'D1N4148', description: 'Small-signal diode (generic 1N4148-style model)', category: 'Semiconductors',
+  name: 'D1N4148', description: 'Small-signal diode (generic 1N4148-style model)', category: 'Diodes',
   refPrefix: 'D', spiceLetter: 'D',
   pins: [{ name: 'A', x: 0, y: 0 }, { name: 'K', x: 40, y: 0 }],
   paths: ['M0 0 H14 M26 0 H40 M26 -8 V8'], fills: ['M14 -8 L14 8 L26 0 Z'],
@@ -185,7 +205,7 @@ const ctrlSrc = (letter: 'E' | 'F' | 'G' | 'H', desc: string, unit: string): Par
   const plusMinus = ['M24 18 H28 M26 16 V20 M24 23.5 H28'];                       // ± inside the circle
   const arrowDown = ['M26 15.5 V24.5', 'M24 21.5 L26 24.5 L28 21.5'];             // ↓ inside the circle
   return {
-    name: letter, description: desc, category: 'Controlled sources', refPrefix: letter, spiceLetter: letter,
+    name: letter, description: desc, category: 'Other', refPrefix: letter, spiceLetter: letter,
     pins: [{ name: '+', x: 40, y: 0 }, { name: '-', x: 40, y: 40 }, { name: 'C+', x: 0, y: 0 }, { name: 'C-', x: 0, y: 40 }],
     paths: [
       'M7 -5 H33 V45 H7 Z',                                                        // body
@@ -258,7 +278,7 @@ const swTime = (closing: boolean): PartDef => ({
 
 /** PSpice BUBBLE (port library): connects nets by name without drawing wires. Pin at the circle's edge. */
 const bubble: PartDef = {
-  name: 'BUBBLE', description: 'Bubble: connects every pin/wire with the same LABEL (no wire needed)', category: 'Connectors',
+  name: 'BUBBLE', description: 'Bubble: connects every pin/wire with the same LABEL (no wire needed)', category: 'Other',
   refPrefix: '', spiceLetter: '', isBubble: true,
   pins: [{ name: '1', x: 0, y: 0 }],
   paths: ['M0 0 H6'], circles: [{ cx: 10, cy: 0, r: 4 }],                     // pin — stub — bubble (Ctrl+R to turn it)
@@ -270,7 +290,7 @@ const bubble: PartDef = {
 export const PARAM_SLOTS = 3;
 const paramBlock: PartDef = {
   name: 'PARAM', description: 'PARAMETERS block: global parameters for {expressions} and parametric sweeps',
-  category: 'Special', refPrefix: '', spiceLetter: '', pins: [], paths: [], isParam: true,
+  category: 'Other', refPrefix: '', spiceLetter: '', pins: [], paths: [], isParam: true,
   refPos: { x: 0, y: 0, align: 'start' }, valPos: { x: 0, y: 0, align: 'start' },
   props: Array.from({ length: PARAM_SLOTS }, (_, i) => [
     { name: `NAME${i + 1}`, default: '', kind: 'text' as const, optional: true, help: 'Parameter name, e.g. Rh' },
@@ -279,7 +299,7 @@ const paramBlock: PartDef = {
 };
 
 const agnd: PartDef = {
-  name: 'AGND', description: 'Analog ground (SPICE node 0)', category: 'Ground', refPrefix: '', spiceLetter: '',
+  name: 'AGND', description: 'Analog ground (SPICE node 0)', category: 'Other', refPrefix: '', spiceLetter: '',
   pins: [{ name: 'GND', x: 0, y: 0 }],
   paths: ['M0 0 V10 M-10 10 H10 L0 20 Z'],
   texts: [], refPos: { x: 14, y: 20, align: 'start' }, valPos: { x: 14, y: 20, align: 'start' },
@@ -287,7 +307,7 @@ const agnd: PartDef = {
 };
 
 const gndEarth: PartDef = {
-  name: 'GND_EARTH', description: 'Earth ground (SPICE node 0)', category: 'Ground', refPrefix: '', spiceLetter: '',
+  name: 'GND_EARTH', description: 'Earth ground (SPICE node 0)', category: 'Other', refPrefix: '', spiceLetter: '',
   pins: [{ name: 'GND', x: 0, y: 0 }],
   paths: ['M0 0 V10 M-10 10 H10 M-6 14 H6 M-2 18 H2'],
   refPos: { x: 14, y: 20, align: 'start' }, valPos: { x: 14, y: 20, align: 'start' },
@@ -295,7 +315,10 @@ const gndEarth: PartDef = {
 };
 
 export const LIBRARY: PartDef[] = [
-  res, cap, ind, vdc, idc, vsin, vpulse, vac, vpwl, diode,
+  vdc, idc, vac, vsin, vpulse, vpwl,
+  res, cap, ind,
+  d1n4001, zener, dbreak, diode,
+  qnpn, qpnp, mbreakN, mbreakP,
   ctrlSrc('E', 'Voltage-controlled voltage source (VCVS)', 'V/V'),
   ctrlSrc('F', 'Current-controlled current source (CCCS)', 'A/A'),
   ctrlSrc('G', 'Voltage-controlled current source (VCCS)', 'A/V'),
@@ -305,7 +328,14 @@ export const LIBRARY: PartDef[] = [
 ];
 
 export const PART_MAP: Record<string, PartDef> = Object.fromEntries(LIBRARY.map(d => [d.name, d]));
-export const findDef = (name: string): PartDef | undefined => PART_MAP[name] ?? LIBRARY.find(d => d.name.toLowerCase() === name.toLowerCase());
+export const CATEGORIES = ['Sources', 'Passive', 'Diodes', 'BJT', 'MOSFET', 'Switches', 'Other'];
+export const findDef = (name: string): PartDef | undefined => {
+  const n = name.trim().toLowerCase();
+  return PART_MAP[name] ?? LIBRARY.find(d => d.name.toLowerCase() === n) ?? LIBRARY.find(d => d.aliases?.some(a => a.toLowerCase() === n));
+};
+/** Part Browser search: name, aliases and description. */
+export const matchesPart = (d: PartDef, q: string) =>
+  [d.name, d.description, d.category, ...(d.aliases ?? [])].join(' ').toLowerCase().includes(q.trim().toLowerCase());
 export const getDef = (type: string): PartDef => {
   const d = PART_MAP[type];
   if (!d) throw new Error(`Unknown part type ${type}`);

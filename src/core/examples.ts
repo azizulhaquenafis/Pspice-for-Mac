@@ -90,6 +90,183 @@ export function switchedRL(): Builder {
   return b;
 }
 
+// ---------------------------------------------------------------- device examples (milestone: semiconductors)
+const alias = (b: Builder, x: number, y: number, text: string) => b.doc.labels.push({ id: newId('l'), x, y, text, kind: 'alias' });
+const vmark = (b: Builder, x: number, y: number) => b.doc.markers.push({ id: newId('m'), kind: 'V', x, y });
+const imark = (b: Builder, p: Part, pin: string) => { const q = b.pin(p, pin); b.doc.markers.push({ id: newId('m'), kind: 'I', ...q, partId: p.id, pin }); };
+const tranP = (printStep: string, finalTime: string, stepCeiling = '') => ({ enabled: true, printStep, finalTime, noPrint: '0', stepCeiling, uic: false });
+/** Supply VDC at (0,100) with + wired up to the rail y = 0 and − to ground. */
+function supply(b: Builder, ref: string, dc: string, railTo: number[]) {
+  b.part('VDC', ref, 0, 100, 0, { DC: dc });
+  b.wire({ x: 0, y: 100 }, { x: 0, y: 0 });
+  let x0 = 0; for (const x of railTo) { b.wire({ x: x0, y: 0 }, { x, y: 0 }); x0 = x; }
+  b.wire({ x: 0, y: 140 }, { x: 0, y: 160 }); b.gnd({ x: 0, y: 160 });
+}
+/** Base / gate divider: R_top from the rail (140,0) to (140,40), wire to node (140,100), R_bot to ground, wire to (180,100). */
+function divider2(b: Builder, rTop: string, rBot: string) {
+  b.part('R', 'R1', 140, 0, 3, { VALUE: rTop });
+  b.wire({ x: 140, y: 40 }, { x: 140, y: 100 });
+  b.part('R', 'R2', 140, 100, 3, { VALUE: rBot });
+  b.wire({ x: 140, y: 140 }, { x: 140, y: 160 }); b.gnd({ x: 140, y: 160 });
+  b.wire({ x: 140, y: 100 }, { x: 180, y: 100 });
+}
+/** Small-signal input: VAC at (60,140), coupling capacitor (60,100)–(100,100) into node (140,100). */
+function acInput(b: Builder, cin: string) {
+  b.part('C', 'CIN', 60, 100, 0, { VALUE: cin, IC: '' });
+  b.wire({ x: 100, y: 100 }, { x: 140, y: 100 });
+  b.part('VAC', 'VIN', 60, 140, 0, { ACMAG: '1V', ACPHASE: '0', DC: '0V' });
+  b.wire({ x: 60, y: 100 }, { x: 60, y: 140 });
+  b.wire({ x: 60, y: 180 }, { x: 60, y: 200 }); b.gnd({ x: 60, y: 200 });
+  alias(b, 60, 120, 'IN');
+}
+
+/** VPULSE 0→10 V (TD 1 ms, TR/TF 1 µs, PW 5 ms, PER 10 ms) into R 1k + C 1µ (τ = 1 ms). */
+export function vpulseRC(): Builder {
+  const b = new Builder(); b.doc.title = 'VPULSE_RC';
+  b.part('VPULSE', 'V1', 0, 100, 0, { V1: '0', V2: '10', TD: '1ms', TR: '1us', TF: '1us', PW: '5ms', PER: '10ms', DC: '', AC: '' });
+  b.wire({ x: 0, y: 100 }, { x: 0, y: 60 }); b.wire({ x: 0, y: 60 }, { x: 40, y: 60 });
+  const r = b.part('R', 'R1', 40, 60, 0, { VALUE: '1k' });
+  b.wire({ x: 80, y: 60 }, { x: 120, y: 60 });
+  b.part('C', 'C1', 120, 60, 3, { VALUE: '1u', IC: '' });
+  b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 }); b.gnd({ x: 0, y: 140 });
+  alias(b, 20, 60, 'IN'); alias(b, 100, 60, 'OUT');
+  b.doc.profile.tran = tranP('10us', '20ms', '10us');
+  vmark(b, 20, 60); vmark(b, 100, 60); imark(b, r, '1');
+  return b;
+}
+
+/** VSIN 10 V / 60 Hz → D1N4001 → RL 1k: half-wave rectifier. */
+export function halfWave(): Builder {
+  const b = new Builder(); b.doc.title = 'HalfWave_D1N4001';
+  b.part('VSIN', 'V1', 0, 100, 0, { VOFF: '0', VAMPL: '10', FREQ: '60', TD: '0', DF: '0', PHASE: '0', DC: '', AC: '' });
+  b.wire({ x: 0, y: 100 }, { x: 0, y: 60 }); b.wire({ x: 0, y: 60 }, { x: 40, y: 60 });
+  const d = b.part('D1N4001', 'D1', 40, 60, 0);
+  b.wire({ x: 80, y: 60 }, { x: 120, y: 60 });
+  b.part('R', 'RL', 120, 60, 3, { VALUE: '1k' });
+  b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 }); b.gnd({ x: 0, y: 140 });
+  alias(b, 20, 60, 'IN'); alias(b, 100, 60, 'OUT');
+  b.doc.profile.tran = tranP('20us', '50ms', '20us');
+  vmark(b, 20, 60); vmark(b, 100, 60); imark(b, d, 'A');
+  return b;
+}
+
+/** 12 V → RS 1k → OUT; Zener DZ5V1 (cathode at OUT) to ground; RL 10k load. Bias point + DC sweep of V1. */
+export function zenerReg(): Builder {
+  const b = new Builder(); b.doc.title = 'Zener_Regulator';
+  b.part('VDC', 'V1', 0, 100, 0, { DC: '12V' });
+  b.wire({ x: 0, y: 100 }, { x: 0, y: 60 }); b.wire({ x: 0, y: 60 }, { x: 40, y: 60 });
+  b.part('R', 'RS', 40, 60, 0, { VALUE: '1k' });
+  b.wire({ x: 80, y: 60 }, { x: 120, y: 60 }); b.wire({ x: 120, y: 60 }, { x: 180, y: 60 });
+  const z = b.part('ZENER', 'D1', 120, 100, 1);            // anode (120,100) at the bottom, cathode (120,60) at OUT
+  b.part('R', 'RL', 180, 60, 3, { VALUE: '10k' });
+  b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 });
+  b.wire({ x: 180, y: 100 }, { x: 180, y: 140 }); b.gnd({ x: 180, y: 140 }); b.gnd({ x: 0, y: 140 });
+  alias(b, 100, 60, 'OUT');
+  b.doc.profile.dc = { enabled: true, source: 'V1', start: '0', end: '15', incr: '0.1' };
+  vmark(b, 100, 60); imark(b, z, 'K');
+  return b;
+}
+
+/** Voltage-divider-biased NPN common-emitter amplifier, emitter bypassed; AC sweep 10 Hz – 10 MHz. */
+export function npnCE(): Builder {
+  const b = new Builder(); b.doc.title = 'NPN_CE_Amplifier';
+  supply(b, 'VCC', '12V', [140, 200]);
+  divider2(b, '47k', '10k');
+  const q = b.part('QNPN', 'Q1', 200, 80, 0);
+  b.part('R', 'RC', 200, 0, 3, { VALUE: '4.7k' });
+  b.wire({ x: 200, y: 40 }, { x: 200, y: 60 }); b.wire({ x: 200, y: 60 }, { x: 200, y: 80 });
+  b.part('R', 'RE', 200, 120, 3, { VALUE: '1k' });
+  b.wire({ x: 200, y: 160 }, { x: 200, y: 180 }); b.gnd({ x: 200, y: 180 });
+  b.wire({ x: 200, y: 120 }, { x: 240, y: 120 });
+  b.part('C', 'CE', 240, 120, 3, { VALUE: '100u', IC: '' });
+  b.wire({ x: 240, y: 160 }, { x: 240, y: 180 }); b.gnd({ x: 240, y: 180 });
+  b.part('C', 'COUT', 200, 60, 0, { VALUE: '10u', IC: '' });
+  b.wire({ x: 240, y: 60 }, { x: 280, y: 60 });
+  b.part('R', 'RL', 280, 60, 3, { VALUE: '10k' });
+  b.wire({ x: 280, y: 100 }, { x: 280, y: 120 }); b.gnd({ x: 280, y: 120 });
+  acInput(b, '10u');
+  alias(b, 160, 100, 'B'); alias(b, 200, 70, 'C'); alias(b, 220, 120, 'E'); alias(b, 250, 60, 'OUT');
+  b.doc.profile.ac = { enabled: true, sweep: 'dec', points: '20', start: '10', end: '10Meg' };
+  vmark(b, 280, 60);   // AC sweep: device currents are not saved by ngspice in AC, so no current marker here
+  void q;
+  return b;
+}
+
+/** PNP biased by a divider, emitter resistor to +12 V (symbol flipped: emitter on top). */
+export function pnpBias(): Builder {
+  const b = new Builder(); b.doc.title = 'PNP_Bias';
+  supply(b, 'VCC', '12V', [140, 200]);
+  divider2(b, '10k', '47k');
+  const q = b.part('QPNP', 'Q1', 200, 120, 2); q.mirror = true;   // E (200,80) top, B (180,100), C (200,120)
+  b.part('R', 'RE', 200, 0, 3, { VALUE: '1k' });
+  b.wire({ x: 200, y: 40 }, { x: 200, y: 80 });
+  b.part('R', 'RC', 200, 120, 3, { VALUE: '4.7k' });
+  b.wire({ x: 200, y: 160 }, { x: 200, y: 180 }); b.gnd({ x: 200, y: 180 });
+  alias(b, 160, 100, 'B'); alias(b, 200, 60, 'E'); alias(b, 200, 120, 'C');
+  b.doc.profile.dc = { enabled: true, source: 'VCC', start: '0', end: '15', incr: '0.1' };
+  vmark(b, 200, 120); imark(b, q, 'C');
+  return b;
+}
+
+/** NMOS common-source amplifier: gate divider 500k/100k (VG = 2 V), RD 4.7k, source and bulk grounded. */
+export function nmosCS(): Builder {
+  const b = new Builder(); b.doc.title = 'NMOS_CS_Amplifier';
+  supply(b, 'VDD', '12V', [140, 200]);
+  divider2(b, '500k', '100k');
+  const m = b.part('MbreakN', 'M1', 200, 80, 0);
+  b.part('R', 'RD', 200, 0, 3, { VALUE: '4.7k' });
+  b.wire({ x: 200, y: 40 }, { x: 200, y: 60 }); b.wire({ x: 200, y: 60 }, { x: 200, y: 80 });
+  b.wire({ x: 220, y: 100 }, { x: 220, y: 120 }); b.wire({ x: 220, y: 120 }, { x: 200, y: 120 });   // bulk to source
+  b.wire({ x: 200, y: 120 }, { x: 200, y: 160 }); b.gnd({ x: 200, y: 160 });
+  acInput(b, '1u');
+  alias(b, 160, 100, 'G'); alias(b, 200, 70, 'OUT');
+  b.doc.profile.ac = { enabled: true, sweep: 'dec', points: '20', start: '10', end: '10Meg' };
+  vmark(b, 200, 60);
+  void m;
+  return b;
+}
+
+/** PMOS high-side switch: source (and bulk) at VDD 5 V, RL 10k to ground, gate driven 0/5 V by VPULSE. */
+export function pmosSwitch(): Builder {
+  const b = new Builder(); b.doc.title = 'PMOS_Switch';
+  supply(b, 'VDD', '5V', [200]);
+  const m = b.part('MbreakP', 'M1', 200, 120, 2); m.mirror = true;   // S (200,80) top, G (180,100), D (200,120), B (220,100)
+  b.wire({ x: 200, y: 0 }, { x: 200, y: 80 });
+  b.wire({ x: 220, y: 100 }, { x: 220, y: 80 }); b.wire({ x: 220, y: 80 }, { x: 200, y: 80 });
+  b.part('R', 'RL', 200, 120, 3, { VALUE: '10k' });
+  b.wire({ x: 200, y: 160 }, { x: 200, y: 180 }); b.gnd({ x: 200, y: 180 });
+  b.part('VPULSE', 'VG', 140, 140, 0, { V1: '0', V2: '5', TD: '1ms', TR: '1us', TF: '1us', PW: '2ms', PER: '4ms', DC: '', AC: '' });
+  b.wire({ x: 140, y: 140 }, { x: 140, y: 100 }); b.wire({ x: 140, y: 100 }, { x: 180, y: 100 });
+  b.wire({ x: 140, y: 180 }, { x: 140, y: 200 }); b.gnd({ x: 140, y: 200 });
+  alias(b, 160, 100, 'G'); alias(b, 200, 120, 'OUT');
+  b.doc.profile.tran = tranP('5us', '10ms', '5us');
+  vmark(b, 160, 100); vmark(b, 200, 120); imark(b, m, 'D');
+  return b;
+}
+
+/** CMOS inverter (PMOS W = 20u so both devices have β = 2 mA/V²): DC transfer curve and pulse response. */
+export function cmosInverter(): Builder {
+  const b = new Builder(); b.doc.title = 'CMOS_Inverter';
+  supply(b, 'VDD', '5V', [200]);
+  const mp = b.part('MbreakP', 'M2', 200, 80, 2, { W: '20u' }); mp.mirror = true;   // S (200,40) G (180,60) D (200,80) B (220,60)
+  b.wire({ x: 200, y: 0 }, { x: 200, y: 40 });
+  b.wire({ x: 220, y: 60 }, { x: 220, y: 40 }); b.wire({ x: 220, y: 40 }, { x: 200, y: 40 });
+  b.part('MbreakN', 'M1', 200, 100, 0);                                             // D (200,100) G (180,120) S (200,140) B (220,120)
+  b.wire({ x: 200, y: 80 }, { x: 200, y: 100 });
+  b.wire({ x: 220, y: 120 }, { x: 220, y: 140 }); b.wire({ x: 220, y: 140 }, { x: 200, y: 140 });
+  b.wire({ x: 200, y: 140 }, { x: 200, y: 160 }); b.gnd({ x: 200, y: 160 });
+  b.wire({ x: 180, y: 60 }, { x: 160, y: 60 }); b.wire({ x: 160, y: 60 }, { x: 160, y: 90 }); b.wire({ x: 160, y: 90 }, { x: 160, y: 120 }); b.wire({ x: 160, y: 120 }, { x: 180, y: 120 });
+  b.part('VPULSE', 'VIN', 100, 90, 0, { V1: '0', V2: '5', TD: '0.5us', TR: '10ns', TF: '10ns', PW: '1us', PER: '2us', DC: '0', AC: '' });
+  b.wire({ x: 100, y: 90 }, { x: 160, y: 90 });
+  b.wire({ x: 100, y: 130 }, { x: 100, y: 150 }); b.gnd({ x: 100, y: 150 });
+  b.doc.junctions.push({ id: newId('j'), x: 160, y: 90 });
+  alias(b, 130, 90, 'IN'); alias(b, 200, 90, 'OUT');
+  b.doc.profile.dc = { enabled: true, source: 'VIN', start: '0', end: '5', incr: '0.01' };
+  b.doc.profile.tran = tranP('5ns', '4us', '5ns');
+  vmark(b, 130, 90); vmark(b, 200, 90);
+  return b;
+}
+
 /** Shift a whole document (used to place examples inside the page border). */
 export function translateDoc(d: SchematicDoc, dx: number, dy: number): SchematicDoc {
   const m = (q: Pt) => ({ x: q.x + dx, y: q.y + dy });
@@ -160,12 +337,20 @@ const RAW_EXAMPLES: { name: string; make: () => SchematicDoc }[] = [
     b.doc.markers.push({ id: newId('m'), kind: 'V', x: 100, y: 60 }, { id: newId('m'), kind: 'V', x: 20, y: 60 });
     return b.doc;
   } },
-  { name: 'RC low-pass (AC sweep)', make: () => {
+  { name: 'VAC RC Low-Pass Filter (AC sweep)', make: () => {
     const b = rcLowpass(); b.doc.title = 'RC_lowpass';
     b.doc.profile.ac = { enabled: true, sweep: 'dec', points: '50', start: '1', end: '100k' };
     b.doc.markers.push({ id: newId('m'), kind: 'V', x: 100, y: 60 });
     return b.doc;
   } },
+  { name: 'VPULSE RC Charging', make: () => vpulseRC().doc },
+  { name: 'D1N4001 Half-Wave Rectifier', make: () => halfWave().doc },
+  { name: 'Zener Voltage Regulator', make: () => zenerReg().doc },
+  { name: 'NPN Common-Emitter Amplifier', make: () => npnCE().doc },
+  { name: 'PNP Transistor Bias', make: () => pnpBias().doc },
+  { name: 'NMOS Common-Source Amplifier', make: () => nmosCS().doc },
+  { name: 'PMOS Switching Circuit', make: () => pmosSwitch().doc },
+  { name: 'CMOS Inverter', make: () => cmosInverter().doc },
 ];
 
 export const EXAMPLES = RAW_EXAMPLES.map(e => ({ name: e.name, make: () => translateDoc(e.make(), 200, 200) }));

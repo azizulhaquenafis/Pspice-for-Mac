@@ -1,4 +1,9 @@
-# Test results — 2026-10-10 (ngspice-47, macOS arm64)
+# Test results — 2026-10-11 (ngspice-47, macOS arm64)
+
+0.5.2: `npx tsc -p .` clean; `npm test` (native ngspice) → 19 files, 182 tests, all passed; `npm run test:wasm` → 19 files, 182 tests, all passed; `npm run build` ok.
+- tests/review-regressions.test.ts (19): B01–B15 regressions. Real-ngspice checks: B06 alias "n0001" divider V = 6 V (exact to 1e-6); B07 F1 C+ marker = 1 mA; B08 C IC={V0}, V0=10: v(out) = 10·e^(−t/1 ms) at the first point and at 1 ms (UIC output starts at the first timestep, see KNOWN_ISSUES); unevaluable IC → error.
+  Note: the WebAssembly engine under Node mis-detects a stubbed `window` as a browser between runs, so the simulation tests unstub it (browser builds run WASM in a Worker).
+- tests/tran-step.test.ts (+3): Print Step 0 / −1 µs / 1 ns / 1 ps for 1 ms → 1 µs; > Final Time → TSTOP/1000; 1 ns for 4 ms → 5 µs; sweep 21 runs 0.1 µs → 0.5 µs (fits 200k); schematic deck uses the fixed step with a warning; `.tran 0 1ms` RC on ngspice: V(OUT)(1 ms) = 1 − e^(−10). The two earlier tests that expected an error for TSTEP 0 / too-fine output were changed to the new requested behaviour (feature change, 2026-10-11); TMAX/TSTART/TSTOP errors unchanged.
 
 `npm test` (native ngspice) → 18 files, 160 tests, all passed; `npm run test:wasm` (ngspice-WebAssembly, the production backend) → 18 files, 160 tests, all passed (0.5.1).
 

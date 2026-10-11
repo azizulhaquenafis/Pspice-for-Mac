@@ -14,6 +14,7 @@ export interface Part {
   props: Record<string, string>;
   refOff?: Pt;             // manual offset of the reference text (dragged by the user)
   valOff?: Pt;             // manual offset of the value text
+  hide?: { ref?: boolean; val?: boolean }; // reference / value text hidden on the schematic
 }
 
 /** Axis-aligned wire segment. */

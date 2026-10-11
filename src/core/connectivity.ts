@@ -119,21 +119,30 @@ export function extractConnectivity(doc: SchematicDoc): Connectivity {
   const nets = [...byRoot.values()];
   const sortKey = (n: Net) => n.pins.map(p => `${p.ref}:${p.pin}`).sort()[0] ?? `~${n.wireIds.slice().sort()[0] ?? ''}`;
   nets.sort((a, b) => sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true }));
-  const used = new Set<string>();
+  // SPICE node names are case-insensitive: every reservation and comparison uses the lower-case form, so a
+  // label "n0001" can never coincide with a generated "N0001", and two labels that sanitize to the same
+  // name (e.g. "A-B" and "A_B") never silently merge distinct nets.
+  const used = new Set<string>(['0']);
   for (const n of nets) {
     if (n.aliases.some(a => a === '0' || a.toLowerCase() === 'gnd')) n.isGround = true;
     if (n.isGround) { n.name = '0'; continue; }
     if (n.aliases.length) {
       if (n.aliases.length > 1) warnings.push(`Net has multiple aliases (${n.aliases.join(', ')}); using "${n.aliases[0]}"`);
-      n.name = sanitizeNode(n.aliases[0]);
+      let nm = sanitizeNode(n.aliases[0]);
+      if (used.has(nm.toLowerCase())) {
+        const base = nm; let k = 2;
+        while (used.has(`${base}_${k}`.toLowerCase())) k++;
+        nm = `${base}_${k}`;
+        warnings.push(`Net label "${n.aliases[0]}" would share the SPICE node name "${base}" with another net (names are case-insensitive and special characters become "_"); this net is named "${nm}" instead`);
+      }
+      n.name = nm; used.add(nm.toLowerCase());
     }
   }
-  for (const n of nets) used.add(n.name);
   for (const n of nets) {
     if (n.name) continue;
     let nm: string;
-    do { nm = `N${String(++auto).padStart(4, '0')}`; } while (used.has(nm));
-    n.name = nm; used.add(nm);
+    do { nm = `N${String(++auto).padStart(4, '0')}`; } while (used.has(nm.toLowerCase()));
+    n.name = nm; used.add(nm.toLowerCase());
   }
   nets.forEach((n, i) => (n.id = i));
 
