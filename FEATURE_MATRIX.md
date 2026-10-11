@@ -65,3 +65,18 @@
 | Files | PSpice Schematics .sch import (page 1; library parts R C L V/I sources E F G H D1N4148 switches PARAM BUBBLE grounds; analysis setup) | 🟡 tested on a hand-made 9.1-format file only — real course files still to be verified |
 | Files | OrCAD Capture .dsn/.opj import, multi-page .sch, transistor/op-amp parts | ⛔ |
 | Desktop | Tauri macOS app | ⛔ (M4) |
+| Parts | VAC (DC + AC magnitude/phase; no transient sine) | ✅ (devices tests: RC low-pass vs 1/(1+jf/fc), fc 159.15 Hz) |
+| Parts | VPULSE (V1 V2 TD TR TF PW PER; timing validation) | ✅ (devices tests: waveform, RC charge/discharge) |
+| Parts | D1N4001, ZENER (DZ5V1), Dbreak with editable .model; D1N4148 (fixed) | ✅ (forward/reverse, I–V sweep, half-wave, regulator) |
+| Parts | QNPN / QPNP (C B E), editable Gummel-Poon subset | ✅ (CE amplifier bias + gain, cutoff/saturation/switching, PNP bias) |
+| Parts | MbreakN / MbreakP four-terminal LEVEL=1 (W L AD AS PD PS) | ✅ (square law, triode, body effect, CS amp, PMOS switch, CMOS inverter) |
+| Parts | Import .model card, Reset to Default, hide ref/value text | ✅ (devices tests + GUI-checked) |
+| Parts | Model parameters as {parameters} in parametric sweeps (fresh card per run) | ✅ (W, VTO, ACMAG, V2 sweeps) |
+| Probe | Transistor terminal currents I(Q:C/B/E), I(M:D/G/S/B), IC() IB() IE() ID() IG() IS(), W(Q) | ✅ (KCL checks; PMOS sign corrected) |
+| Probe | Device currents in AC sweep | ⛔ not yet available (ngspice saves no device currents in AC; reported as unavailable) |
+| Editor | Part Browser categories, aliases, fitted preview | ✅ (GUI-checked) |
+| Import | Transistors/diodes from .sch files | 🟡 names resolve via aliases; pin alignment untested without a reference file |
+| Sim | DC Sweep: Global Parameter, Temperature; Linear / Octave / Decade / Value List | ✅ (max-power tests: W(RL) = V²RL/(RS+RL)² at every point) |
+| Sim | DC Sweep: Model Parameter, Nested Sweep | ⛔ not yet available |
+| Sim | Parametric / .STEP with only the bias point → "Bias point vs parameter" curve in Probe | ✅ (max-power tests, GUI-checked) |
+| Netlist | .DC PARAM (LIN/DEC/OCT/LIST), .DC LIN source | ✅ (max-power tests) |

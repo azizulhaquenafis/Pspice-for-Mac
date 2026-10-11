@@ -120,7 +120,8 @@ const mos = (type: 'NMOS' | 'PMOS'): PartDef => ({
   paths: mosPaths,
   fills: [type === 'NMOS' ? 'M-4 20 L2 17.5 L2 22.5 Z' : 'M4 20 L-2 17.5 L-2 22.5 Z'],
   body: [-20, 0, 20, 40],
-  refPos: { x: 5, y: 7, align: 'start' }, valPos: { x: 5, y: 38, align: 'start' },
+  // text right of the bulk pin, above and below its lead: clear of any bulk-to-source/drain tie
+  refPos: { x: 24, y: 8, align: 'start' }, valPos: { x: 24, y: 38, align: 'start' },
   props: mosProps(type), valueProp: 'MODEL',
   netline: (n, N, v) => `${n} ${N[0]} ${N[1]} ${N[2]} ${N[3]} ${v.MODEL} W=${v.W} L=${v.L}` +
     ['AD', 'AS', 'PD', 'PS'].filter(k => v[k]).map(k => ` ${k}=${v[k]}`).join(''),

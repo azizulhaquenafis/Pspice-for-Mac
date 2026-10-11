@@ -6,12 +6,64 @@
 //   pass 1: .op with C(IC) -> V source (+1 mΩ) and L(IC) -> I source
 //   pass 2: transient with UIC and explicit IC= for every C and L taken from pass 1.
 import { SchematicDoc } from '../core/model';
-import { generateNetlist, NetlistResult, NetlistOptions } from '../core/netlist';
+import { generateNetlist, NetlistResult, NetlistOptions, steppedDc } from '../core/netlist';
+import { getDef } from '../core/library';
+import { sweepValues, MAX_DC_POINTS } from '../core/sweep';
+import { formatEng } from '../core/units';
+import { combineOpPlots } from './sweepPlot';
 import { SimulationEngine, SimResult, getVector } from './types';
 
 export interface SchematicRun { result: SimResult; netlist: NetlistResult; deck: string }
 
 export async function runSchematic(doc: SchematicDoc, engine: SimulationEngine, signal?: AbortSignal, base: NetlistOptions = {}): Promise<SchematicRun> {
+  if (doc.profile.dc.enabled && steppedDc(doc.profile.dc)) return runSteppedDc(doc, engine, signal, base);
+  return runOnce(doc, engine, signal, base);
+}
+
+/** Unit of a global parameter, from the property it sets ({RL} as a resistor VALUE → Ω). */
+export function paramUnit(doc: SchematicDoc, name: string): string {
+  const n = name.trim().toLowerCase();
+  for (const p of doc.parts) for (const pd of getDef(p.type).props)
+    if ((p.props[pd.name] ?? '').replace(/\s/g, '').toLowerCase() === `{${n}}`) return pd.unit ?? '';
+  return '';
+}
+
+/**
+ * DC sweep of a global parameter (PSpice "Global Parameter"), or an octave/decade/list DC sweep: one bias
+ * point per value (ngspice .dc cannot sweep a .param), assembled into a DC plot. Other enabled analyses
+ * run once at the PARAMETERS value, as in PSpice.
+ */
+async function runSteppedDc(doc: SchematicDoc, engine: SimulationEngine, signal: AbortSignal | undefined, base: NetlistOptions): Promise<SchematicRun> {
+  const d = doc.profile.dc, vt = d.varType ?? 'source', name = d.source.trim();
+  const main = await runOnce(doc, engine, signal, base);       // validates; .op (+ tran/ac) at nominal values
+  if (!main.result.ok) return main;
+  const { values, error } = sweepValues({ sweep: d.sweep ?? 'lin', start: d.start, end: d.end, incr: d.incr, values: d.values ?? '' }, MAX_DC_POINTS);
+  if (error) return { ...main, result: { ...main.result, ok: false, errors: [`DC Sweep: ${error}`] } };
+  const opOnly: SchematicDoc = { ...doc, profile: { ...doc.profile, dc: { ...d, enabled: false }, tran: { ...doc.profile.tran, enabled: false }, ac: { ...doc.profile.ac, enabled: false } } };
+  const points: { value: number; plot: SimResult['plots'][number] | undefined }[] = [];
+  let log = main.result.log, elapsed = main.result.elapsedMs;
+  for (const v of values) {
+    if (signal?.aborted) return { ...main, result: { ...main.result, ok: false, errors: ['Simulation cancelled'] } };
+    let dv = opOnly;
+    if (vt === 'source') dv = { ...opOnly, parts: opOnly.parts.map(p => p.ref.toUpperCase() !== name.toUpperCase() ? p
+      : { ...p, props: { ...p.props, [getDef(p.type).props.some(q => q.name === 'DC') ? 'DC' : getDef(p.type).valueProp ?? 'DC']: String(v) } }) };
+    const overrides = new Map(base.paramOverrides ?? []);
+    if (vt === 'global') overrides.set(name.toLowerCase(), v);
+    const r = await runOnce(dv, engine, signal, { ...base, paramOverrides: overrides, temp: vt === 'temp' ? v : base.temp });
+    const label = `${vt === 'temp' ? 'TEMP' : name} = ${formatEng(v, 5)}`;
+    if (!r.result.ok) return { ...main, result: { ...main.result, ok: false, errors: [`DC Sweep at ${label}: ${r.result.errors[0] ?? 'failed'}`] } };
+    points.push({ value: v, plot: r.result.plots.find(p => p.kind === 'op') });
+    log += `\n===== DC sweep ${label} =====\n${r.result.log}`; elapsed += r.result.elapsedMs;
+  }
+  const xLabel = vt === 'temp' ? 'TEMP' : vt === 'global' ? name : `${/^I/i.test(name) ? 'I' : 'V'}_${name.toUpperCase()}`;
+  const unit = vt === 'temp' ? '°C' : vt === 'global' ? paramUnit(doc, name) : /^I/i.test(name) ? 'A' : 'V';
+  const plot = combineOpPlots(points, `DC Sweep of ${xLabel} (${values.length} bias points)`, xLabel, unit);
+  const plots = plot ? [...main.result.plots, plot] : main.result.plots;
+  const deck = `${main.deck}* DC sweep of ${xLabel}: ${values.length} bias-point runs (${formatEng(values[0], 5)} … ${formatEng(values[values.length - 1], 5)})\n`;
+  return { ...main, result: { ...main.result, plots, log, elapsedMs: elapsed }, deck };
+}
+
+async function runOnce(doc: SchematicDoc, engine: SimulationEngine, signal: AbortSignal | undefined, base: NetlistOptions): Promise<SchematicRun> {
   const nl = generateNetlist(doc, base);
   const fail = (errors: string[], deck = nl.text): SchematicRun =>
     ({ result: { ok: false, plots: [], log: '', errors, elapsedMs: 0 }, netlist: nl, deck });

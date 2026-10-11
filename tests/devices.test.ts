@@ -335,8 +335,9 @@ describe('Stage 4 — MbreakN / MbreakP', () => {
     const p = run.result.plots, tp = plotOf(p, 'tran'), devs = parseDeckDevices(run.deck);
     const { markerExprs } = await import('../src/ui/probeModel');
     const expr = markerExprs(pmosSwitch().doc).find(e => e?.startsWith('I('))!;
-    expect(expr).toBe('I(M1:D)');
-    const t = vec(p, 'tran', 'time'), vo = vec(p, 'tran', 'v(out)'), id = evaluateExpr(expr, tp, devs).re;
+    expect(expr).toBe('I(M1:S)');
+    expect(evaluateExpr(expr, tp, devs).re[100]).toBeCloseTo(-evaluateExpr('I(M1:D)', tp, devs).re[100], 11);   // gate 0, bulk leakage ~1e-13 A
+    const t = vec(p, 'tran', 'time'), vo = vec(p, 'tran', 'v(out)'), id = evaluateExpr('I(M1:D)', tp, devs).re;
     const irl = vec(p, 'tran', 'i(@rl[i])');
     const on = at(t, vo, 0.5e-3), off = at(t, vo, 2e-3);
     expect(on).toBeGreaterThan(4.8); expect(Math.abs(off)).toBeLessThan(1e-3);
@@ -528,5 +529,14 @@ Q1 c b 0 QN
     expect([cat('VAC'), cat('VPULSE'), cat('VPWL'), cat('IDC')]).toEqual(['Sources', 'Sources', 'Sources', 'Sources']);
     expect([cat('D1N4001'), cat('ZENER'), cat('Dbreak'), cat('QNPN'), cat('QPNP'), cat('MbreakN'), cat('MbreakP')]).toEqual(['Diodes', 'Diodes', 'Diodes', 'BJT', 'BJT', 'MOSFET', 'MOSFET']);
     expect([cat('Sw_tOpen'), cat('PARAM'), cat('AGND'), cat('E'), cat('R')]).toEqual(['Switches', 'Other', 'Other', 'Other', 'Passive']);
+  });
+});
+
+describe('Probe axis labels', () => {
+  it('DC sweep x axis is labelled with the swept source, PSpice style (V_VIN)', async () => {
+    const { xAxis } = await import('../src/ui/probeModel');
+    const run = await runSchematic(cmosInverter().doc, engine);
+    expect(xAxis(plotOf(run.result.plots, 'dc'), run.deck).label).toBe('V_VIN');
+    expect(xAxis(plotOf(run.result.plots, 'tran'), run.deck).label).toBe('Time (s)');
   });
 });

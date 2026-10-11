@@ -2,11 +2,13 @@
 // unsupported statements are reported as errors instead of being silently dropped.
 import { parseSpiceNumber, spiceNum } from './units';
 import { planTran } from './tranPlan';
-import { sweepValues } from './sweep';
+import { sweepValues, MAX_DC_POINTS } from './sweep';
 
 export interface StepSpec { kind: 'param' | 'temp'; name: string; values: number[] }
 export interface Translated {
   text: string; notes: string[]; errors: string[]; step?: StepSpec; measures: string[];
+  /** .DC PARAM name ...: run one bias point per value (ngspice .dc cannot sweep a .param). */
+  dcParam?: { name: string; values: number[] };
   /** Signals listed on .PROBE lines (used as the initial Probe traces). */
   probes: string[];
 }
@@ -29,6 +31,8 @@ export function translateDeck(input: string): Translated {
     notes.push(`Line 1 "${lines[0].trim()}" is treated as the TITLE, not a device (SPICE rule).`);
   let analyses = 0;
   let step: StepSpec | undefined;
+  let dcParam: Translated['dcParam'];
+  let otherAnalyses = 0;
   const measures: string[] = [], probes: string[] = [];
   let tran: { idx: number; n: number; vals: number[]; uic: boolean } | undefined;
   const out = lines.map((raw, i) => {
@@ -57,10 +61,24 @@ export function translateDeck(input: string): Translated {
     const mm = /^\.meas(?:ure)?\s+\w+\s+(\w+)/i.exec(line);
     if (mm) measures.push(mm[1].toLowerCase());
     if (/^\.save\b/i.test(line)) notes.push(`Line ${n}: .SAVE limits the signals available in Probe to those listed`);
-    if (/^\.(op|dc|ac)\b/i.test(line)) analyses++;
+    if (/^\.dc\b/i.test(line)) {
+      const r = parseDc(line);
+      if (typeof r === 'string') { errors.push(`Line ${n}: ${r}`); return raw; }
+      analyses++;
+      if (r.kind === 'param') {
+        if (dcParam) { errors.push(`Line ${n}: only one .DC PARAM sweep is supported`); return `* ${raw}`; }
+        dcParam = { name: r.name, values: r.values };
+        notes.push(`Line ${n}: .DC PARAM ${r.name} runs ${r.values.length} bias points (ngspice cannot sweep a .param directly)`);
+        return `* (stepped DC) ${raw}`;
+      }
+      otherAnalyses++;
+      if (r.text !== line) notes.push(`Line ${n}: written for ngspice as "${r.text}"`);
+      return r.text;
+    }
+    if (/^\.(op|ac)\b/i.test(line)) { analyses++; otherAnalyses++; }
     const m = /^\.tran\b(.*)$/i.exec(line);
     if (m) {
-      analyses++;
+      analyses++; otherAnalyses++;
       const toks = m[1].trim().split(/\s+/).filter(Boolean);
       const uic = toks.some(t => t.toLowerCase() === 'uic');
       const nums = toks.filter(t => t.toLowerCase() !== 'uic');
@@ -85,8 +103,34 @@ export function translateDeck(input: string): Translated {
     }
   }
   if (!analyses) errors.push('No analysis statement (.OP, .TRAN, .DC or .AC) found.');
+  if (dcParam && !otherAnalyses) {             // the bias point at the .param value(s) as the main run
+    const e = out.findIndex((l, i) => i > 0 && /^\s*\.end\s*$/i.test(l));
+    out.splice(e >= 0 ? e : out.length, 0, '.op');
+  }
   if (!out.some(l => /^\s*\.end\s*$/i.test(l))) { out.push('.end'); notes.push('Added missing .END'); }
-  return { text: out.join('\n') + '\n', notes, errors, step, measures, probes };
+  return { text: out.join('\n') + '\n', notes, errors, step, measures, probes, dcParam };
+}
+
+/**
+ * PSpice .DC forms:  .DC [LIN] src start stop incr [nested...]   .DC [LIN|OCT|DEC] PARAM name start stop incr|points
+ *                    .DC PARAM name LIST v...   .DC [LIN] TEMP start stop incr
+ * Linear source / TEMP sweeps go to ngspice as .dc (LIN keyword removed); PARAM sweeps are stepped.
+ */
+export function parseDc(line: string): { kind: 'native'; text: string } | { kind: 'param'; name: string; values: number[] } | string {
+  const t = line.trim().split(/\s+/).slice(1);
+  let sweep: 'lin' | 'oct' | 'dec' | 'list' = 'lin', explicit = false;
+  if (/^(lin|oct|dec)$/i.test(t[0] ?? '')) { sweep = t.shift()!.toLowerCase() as 'lin' | 'oct' | 'dec'; explicit = true; }
+  if (/^param$/i.test(t[0] ?? '')) {
+    t.shift(); const name = t.shift() ?? '';
+    if (!/^[a-z_]\w*$/i.test(name)) return '.DC PARAM needs a parameter name';
+    if (/^list$/i.test(t[0] ?? '')) { sweep = 'list'; t.shift(); }
+    else if (t.length > 3) return '.DC PARAM: nested sweeps are not supported yet';
+    const r = sweepValues({ sweep, start: t[0] ?? '', end: t[1] ?? '', incr: t[2] ?? '', values: t.join(' ') }, MAX_DC_POINTS);
+    return r.error ? `.DC PARAM ${name}: ${r.error}` : { kind: 'param', name, values: r.values };
+  }
+  if (sweep !== 'lin' || /^list$/i.test(t[1] ?? ''))
+    return `.DC ${t[0] ?? ''}: only linear sweeps of sources and TEMP are supported; use .DC ${sweep.toUpperCase()} PARAM for logarithmic or list sweeps`;
+  return { kind: 'native', text: explicit ? `.dc ${t.join(' ')}` : line.trim() };
 }
 
 /** .STEP [LIN|OCT|DEC] PARAM name start stop incr|points  /  .STEP PARAM name LIST v...  /  .STEP TEMP ... */

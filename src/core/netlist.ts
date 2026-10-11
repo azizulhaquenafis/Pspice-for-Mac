@@ -8,7 +8,7 @@ import { parseSpiceNumber, spiceNum } from './units';
 import { ParamDef, resolveParams, evalExpr, exprToSpice, isBraced, unbrace } from './params';
 import { PARAM_SLOTS } from './library';
 import { planTran } from './tranPlan';
-import { sweepValues } from './sweep';
+import { sweepValues, MAX_DC_POINTS } from './sweep';
 
 export interface Diagnostic { level: 'error' | 'warning'; message: string; partId?: string }
 export interface NetlistResult {
@@ -33,6 +33,9 @@ export interface NetlistOptions {
   /** Parametric sweep over temperature (°C). */
   temp?: number;
 }
+
+/** DC sweeps that ngspice's .dc cannot express: global parameters and octave/decade/list sweeps. */
+export const steppedDc = (d: SchematicDoc['profile']['dc']) => (d.varType ?? 'source') === 'global' || (d.sweep ?? 'lin') !== 'lin';
 
 /** Points ngspice would need for a transient; used to refuse runs that would hang the app. */
 export { MAX_TRAN_POINTS } from './tranPlan';
@@ -180,12 +183,22 @@ export function generateNetlist(doc: SchematicDoc, opts: NetlistOptions = {}): N
     an.push(cmd);
   }
   if (prof.dc.enabled && !opts.icPass) {
-    const d = prof.dc;
-    const src = doc.parts.find(p => p.ref.toUpperCase() === d.source.trim().toUpperCase() && ['V', 'I'].includes(getDef(p.type).spiceLetter));
-    if (!src) diags.push({ level: 'error', message: `DC Sweep: no independent source named "${d.source}"` });
-    const inc = num(d.incr, 'DC Sweep Increment', diags);
-    if (parseFloat(inc) === 0) diags.push({ level: 'error', message: 'DC Sweep Increment must be non-zero' });
-    an.push(`.dc ${src ? spiceNameFor(src) : d.source} ${num(d.start, 'DC Sweep Start', diags)} ${num(d.end, 'DC Sweep End', diags)} ${inc}`);
+    const d = prof.dc, vt = d.varType ?? 'source';
+    const sv = sweepValues({ sweep: d.sweep ?? 'lin', start: d.start, end: d.end, incr: d.incr, values: d.values ?? '' }, steppedDc(d) ? MAX_DC_POINTS : Infinity);
+    if (sv.error) diags.push({ level: 'error', message: `DC Sweep: ${sv.error}` });
+    let src: Part | undefined;
+    if (vt === 'source') {
+      src = doc.parts.find(p => p.ref.toUpperCase() === d.source.trim().toUpperCase() && ['V', 'I'].includes(getDef(p.type).spiceLetter));
+      if (!src) diags.push({ level: 'error', message: `DC Sweep: no independent source named "${d.source}"` });
+    }
+    if (vt === 'global' && !ptab.values.has(d.source.trim().toLowerCase()))
+      diags.push({ level: 'error', message: `DC Sweep: global parameter "${d.source}" is not defined — declare it in a PARAMETERS block (part PARAM)` });
+    // ngspice .dc sweeps sources and TEMP linearly; global parameters and log/list sweeps run one bias
+    // point per value instead (sim/schematicSim.ts) and are not written as a .dc line.
+    if (!steppedDc(d) && !sv.error) {
+      const inc = num(d.incr, 'DC Sweep Increment', diags);
+      an.push(`.dc ${vt === 'temp' ? 'TEMP' : src ? spiceNameFor(src) : d.source} ${num(d.start, 'DC Sweep Start', diags)} ${num(d.end, 'DC Sweep End', diags)} ${inc}`);
+    }
   }
   if (prof.ac.enabled && !opts.icPass) {
     const a = prof.ac;

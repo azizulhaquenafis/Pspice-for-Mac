@@ -83,7 +83,7 @@ export function importModelCard(def: PartDef, text: string): { props: Record<str
   return { props };
 }
 
-function NumField({ value, onChange, unit, optional }: { value: string; onChange: (v: string) => void; unit?: string; optional?: boolean }) {
+function NumField({ value, onChange, unit, optional, emptyHint = '(optional)' }: { value: string; onChange: (v: string) => void; unit?: string; optional?: boolean; emptyHint?: string }) {
   const braced = isBraced(value);
   let exprErr = '';
   if (braced) { try { tokenize(unbrace(value)); } catch (e) { exprErr = (e as Error).message; } }
@@ -92,7 +92,7 @@ function NumField({ value, onChange, unit, optional }: { value: string; onChange
   return (
     <span className="numfield">
       <input className={bad ? 'bad' : ''} value={value} onChange={e => onChange(e.target.value)} />
-      <span className="hint">{braced ? (exprErr || 'parameter expression') : r ? (r.ok ? `= ${formatEng(r.value, 5)}${unit ?? ''}${r.warning ? ' ⚠ ' + r.warning : ''}` : r.error) : optional ? '(optional)' : 'required'}</span>
+      <span className="hint">{braced ? (exprErr || 'parameter expression') : r ? (r.ok ? `= ${formatEng(r.value, 5)}${unit ?? ''}${r.warning ? ' ⚠ ' + r.warning : ''}` : r.error) : optional ? emptyHint : 'required'}</span>
     </span>
   );
 }
@@ -136,7 +136,7 @@ export function PropertiesDialog({ partId }: { partId: string }) {
       <tr key={pd.name} title={pd.help}>
         <td>{pd.name}{pd.help && <span className="muted"> ({pd.help})</span>}</td>
         <td>{pd.kind === 'num'
-          ? <NumField value={props[pd.name] ?? ''} unit={pd.unit} optional={pd.optional} onChange={v => setProps({ ...props, [pd.name]: v })} />
+          ? <NumField value={props[pd.name] ?? ''} unit={pd.unit} optional={pd.optional} emptyHint={pd.model ? '(ngspice default)' : undefined} onChange={v => setProps({ ...props, [pd.name]: v })} />
           : <span className="numfield"><input style={{ width: 220 }} className={err ? 'bad' : ''} value={props[pd.name] ?? ''} onChange={e => setProps({ ...props, [pd.name]: e.target.value })} />
             {err && <span className="hint">{err}</span>}{!err && pd.model && pd.optional && !(props[pd.name] ?? '').trim() && <span className="hint">(ngspice default)</span>}</span>}</td>
       </tr>
@@ -331,27 +331,41 @@ export function TranDialog() {
 
 export function DcDialog() {
   const [v, setV, save] = useLocal('dc');
+  const vt = v.varType ?? 'source', sw = v.sweep ?? 'lin';
   const srcs = useStore(s => s.doc.parts.filter(p => ['V', 'I'].includes(getDef(p.type).spiceLetter)).map(p => p.ref));
-  const valid = isNum(v.start) && isNum(v.end) && isNum(v.incr) && !!v.source.trim();
+  const params = useStore(s => s.doc.parts.filter(p => getDef(p.type).isParam).flatMap(p => Object.entries(p.props).filter(([k, x]) => k.startsWith('NAME') && x.trim()).map(([, x]) => x.trim())));
+  const listOk = (v.values ?? '').split(/[\s,;]+/).filter(Boolean).every(t => parseSpiceNumber(t).ok) && !!(v.values ?? '').trim();
+  const valid = (vt === 'temp' || !!v.source.trim()) && (sw === 'list' ? listOk : isNum(v.start) && isNum(v.end) && isNum(v.incr));
+  const radio = (on: boolean, label: string, set: () => void) => <label className="chk"><input type="radio" checked={on} onChange={set} /> {label}</label>;
   return (
-    <Dialog title="DC Sweep" onClose={() => useStore.getState().setDialog('analysis')} width={420} buttons={<>
+    <Dialog title="DC Sweep" onClose={() => useStore.getState().setDialog('analysis')} width={440} buttons={<>
       <button className="default" disabled={!valid} onClick={() => save(valid)}>OK</button><button onClick={() => useStore.getState().setDialog('analysis')}>Cancel</button></>}>
       <div className="dc-grid">
         <fieldset><legend>Swept Var. Type</legend>
-          <label className="chk"><input type="radio" checked readOnly /> Voltage/Current Source</label>
-          {['Temperature', 'Model Parameter', 'Global Parameter'].map(t => <label key={t} className="chk na"><input type="radio" disabled /> {t}</label>)}
+          {radio(vt === 'source', 'Voltage/Current Source', () => setV({ ...v, varType: 'source', source: srcs.includes(v.source) ? v.source : srcs[0] ?? '' }))}
+          {radio(vt === 'temp', 'Temperature', () => setV({ ...v, varType: 'temp' }))}
+          <label className="chk na" title="not yet available"><input type="radio" disabled /> Model Parameter (not yet available)</label>
+          {radio(vt === 'global', 'Global Parameter', () => setV({ ...v, varType: 'global', source: params.find(n => n.toLowerCase() === v.source.toLowerCase()) ?? params[0] ?? '' }))}
         </fieldset>
         <fieldset><legend>Sweep Type</legend>
-          <label className="chk"><input type="radio" checked readOnly /> Linear</label>
-          {['Octave', 'Decade', 'Value List'].map(t => <label key={t} className="chk na"><input type="radio" disabled /> {t}</label>)}
+          {radio(sw === 'lin', 'Linear', () => setV({ ...v, sweep: 'lin' }))}
+          {radio(sw === 'oct', 'Octave', () => setV({ ...v, sweep: 'oct' }))}
+          {radio(sw === 'dec', 'Decade', () => setV({ ...v, sweep: 'dec' }))}
+          {radio(sw === 'list', 'Value List', () => setV({ ...v, sweep: 'list' }))}
         </fieldset>
       </div>
-      <div className="row"><label>Name:</label><input list="dc-srcs" value={v.source} onChange={e => setV({ ...v, source: e.target.value })} />
-        <datalist id="dc-srcs">{srcs.map(s => <option key={s} value={s} />)}</datalist></div>
-      <Field label="Start Value:" value={v.start} onChange={x => setV({ ...v, start: x })} />
-      <Field label="End Value:" value={v.end} onChange={x => setV({ ...v, end: x })} />
-      <Field label="Increment:" value={v.incr} onChange={x => setV({ ...v, incr: x })} />
-      <div className="row"><label /><button disabled title="Not yet available">Nested Sweep...</button></div>
+      {vt !== 'temp' && <div className="row"><label>{vt === 'global' ? 'Param. Name:' : 'Name:'}</label><input list="dc-names" value={v.source} onChange={e => setV({ ...v, source: e.target.value })} />
+        <datalist id="dc-names">{(vt === 'global' ? params : srcs).map(x => <option key={x} value={x} />)}</datalist></div>}
+      {vt === 'global' && !params.length && <div className="row"><label /><span className="hint bad-t">Place a PARAMETERS block (part PARAM) and declare the parameter, e.g. RL = 1k, then use {'{RL}'} as a value.</span></div>}
+      {sw === 'list'
+        ? <Field label="Values:" value={v.values ?? ''} onChange={x => setV({ ...v, values: x })} />
+        : <>
+          <Field label="Start Value:" value={v.start} onChange={x => setV({ ...v, start: x })} />
+          <Field label="End Value:" value={v.end} onChange={x => setV({ ...v, end: x })} />
+          <Field label={sw === 'lin' ? 'Increment:' : `Points/${sw === 'dec' ? 'Decade' : 'Octave'}:`} value={v.incr} onChange={x => setV({ ...v, incr: x })} />
+        </>}
+      {(vt === 'global' || sw !== 'lin') && <div className="row"><label /><span className="muted">Runs one bias point per value (up to 500) and plots them against {vt === 'temp' ? 'TEMP' : v.source || 'the swept value'}.</span></div>}
+      <div className="row"><label /><button disabled title="Not yet available">Nested Sweep... (not yet available)</button></div>
     </Dialog>
   );
 }

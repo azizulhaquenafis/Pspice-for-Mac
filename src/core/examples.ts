@@ -120,6 +120,22 @@ function acInput(b: Builder, cin: string) {
   alias(b, 60, 120, 'IN');
 }
 
+/** VS 10 V, RS 50 Ω, RL = {RL}: DC sweep of the global parameter RL; power marker on RL (max 0.5 W at 50 Ω). */
+export function maxPowerTransfer(): Builder {
+  const b = new Builder(); b.doc.title = 'Max_Power_Transfer';
+  b.part('VDC', 'VS', 0, 100, 0, { DC: '10V' });
+  b.wire({ x: 0, y: 100 }, { x: 0, y: 60 }); b.wire({ x: 0, y: 60 }, { x: 40, y: 60 });
+  b.part('R', 'RS', 40, 60, 0, { VALUE: '50' });
+  b.wire({ x: 80, y: 60 }, { x: 120, y: 60 });
+  const rl = b.part('R', 'RL', 120, 60, 3, { VALUE: '{RL}' });
+  b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 }); b.gnd({ x: 0, y: 140 });
+  b.part('PARAM', '', 180, 30, 0, { NAME1: 'RL', VALUE1: '50' });
+  alias(b, 100, 60, 'OUT');
+  b.doc.profile.dc = { enabled: true, varType: 'global', source: 'RL', sweep: 'lin', start: '5', end: '200', incr: '5', values: '' };
+  b.doc.markers.push({ id: newId('m'), kind: 'W', x: 120, y: 80, partId: rl.id });
+  return b;
+}
+
 /** VPULSE 0→10 V (TD 1 ms, TR/TF 1 µs, PW 5 ms, PER 10 ms) into R 1k + C 1µ (τ = 1 ms). */
 export function vpulseRC(): Builder {
   const b = new Builder(); b.doc.title = 'VPULSE_RC';
@@ -144,9 +160,9 @@ export function halfWave(): Builder {
   b.wire({ x: 80, y: 60 }, { x: 120, y: 60 });
   b.part('R', 'RL', 120, 60, 3, { VALUE: '1k' });
   b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 }); b.gnd({ x: 0, y: 140 });
-  alias(b, 20, 60, 'IN'); alias(b, 100, 60, 'OUT');
+  alias(b, 8, 60, 'IN'); alias(b, 88, 60, 'OUT');
   b.doc.profile.tran = tranP('20us', '50ms', '20us');
-  vmark(b, 20, 60); vmark(b, 100, 60); imark(b, d, 'A');
+  vmark(b, 22, 60); vmark(b, 120, 60); imark(b, d, 'A');
   return b;
 }
 
@@ -161,9 +177,9 @@ export function zenerReg(): Builder {
   b.part('R', 'RL', 180, 60, 3, { VALUE: '10k' });
   b.wire({ x: 120, y: 100 }, { x: 120, y: 140 }); b.gnd({ x: 120, y: 140 });
   b.wire({ x: 180, y: 100 }, { x: 180, y: 140 }); b.gnd({ x: 180, y: 140 }); b.gnd({ x: 0, y: 140 });
-  alias(b, 100, 60, 'OUT');
+  alias(b, 140, 60, 'OUT');
   b.doc.profile.dc = { enabled: true, source: 'V1', start: '0', end: '15', incr: '0.1' };
-  vmark(b, 100, 60); imark(b, z, 'K');
+  vmark(b, 180, 60); imark(b, z, 'K');
   return b;
 }
 
@@ -202,9 +218,9 @@ export function pnpBias(): Builder {
   b.wire({ x: 200, y: 40 }, { x: 200, y: 80 });
   b.part('R', 'RC', 200, 120, 3, { VALUE: '4.7k' });
   b.wire({ x: 200, y: 160 }, { x: 200, y: 180 }); b.gnd({ x: 200, y: 180 });
-  alias(b, 160, 100, 'B'); alias(b, 200, 60, 'E'); alias(b, 200, 120, 'C');
+  alias(b, 170, 100, 'B'); alias(b, 200, 60, 'E'); alias(b, 200, 120, 'C');
   b.doc.profile.dc = { enabled: true, source: 'VCC', start: '0', end: '15', incr: '0.1' };
-  vmark(b, 200, 120); imark(b, q, 'C');
+  vmark(b, 145, 100); imark(b, q, 'E');
   return b;
 }
 
@@ -235,12 +251,13 @@ export function pmosSwitch(): Builder {
   b.wire({ x: 220, y: 100 }, { x: 220, y: 80 }); b.wire({ x: 220, y: 80 }, { x: 200, y: 80 });
   b.part('R', 'RL', 200, 120, 3, { VALUE: '10k' });
   b.wire({ x: 200, y: 160 }, { x: 200, y: 180 }); b.gnd({ x: 200, y: 180 });
+  b.wire({ x: 200, y: 120 }, { x: 280, y: 120 });                                   // output stub
   b.part('VPULSE', 'VG', 140, 140, 0, { V1: '0', V2: '5', TD: '1ms', TR: '1us', TF: '1us', PW: '2ms', PER: '4ms', DC: '', AC: '' });
   b.wire({ x: 140, y: 140 }, { x: 140, y: 100 }); b.wire({ x: 140, y: 100 }, { x: 180, y: 100 });
   b.wire({ x: 140, y: 180 }, { x: 140, y: 200 }); b.gnd({ x: 140, y: 200 });
-  alias(b, 160, 100, 'G'); alias(b, 200, 120, 'OUT');
+  alias(b, 160, 100, 'G'); alias(b, 255, 120, 'OUT');
   b.doc.profile.tran = tranP('5us', '10ms', '5us');
-  vmark(b, 160, 100); vmark(b, 200, 120); imark(b, m, 'D');
+  vmark(b, 145, 100); vmark(b, 280, 120); imark(b, m, 'S');
   return b;
 }
 
@@ -252,7 +269,8 @@ export function cmosInverter(): Builder {
   b.wire({ x: 200, y: 0 }, { x: 200, y: 40 });
   b.wire({ x: 220, y: 60 }, { x: 220, y: 40 }); b.wire({ x: 220, y: 40 }, { x: 200, y: 40 });
   b.part('MbreakN', 'M1', 200, 100, 0);                                             // D (200,100) G (180,120) S (200,140) B (220,120)
-  b.wire({ x: 200, y: 80 }, { x: 200, y: 100 });
+  b.wire({ x: 200, y: 80 }, { x: 200, y: 90 }); b.wire({ x: 200, y: 90 }, { x: 200, y: 100 });
+  b.wire({ x: 200, y: 90 }, { x: 260, y: 90 });                                    // output stub
   b.wire({ x: 220, y: 120 }, { x: 220, y: 140 }); b.wire({ x: 220, y: 140 }, { x: 200, y: 140 });
   b.wire({ x: 200, y: 140 }, { x: 200, y: 160 }); b.gnd({ x: 200, y: 160 });
   b.wire({ x: 180, y: 60 }, { x: 160, y: 60 }); b.wire({ x: 160, y: 60 }, { x: 160, y: 90 }); b.wire({ x: 160, y: 90 }, { x: 160, y: 120 }); b.wire({ x: 160, y: 120 }, { x: 180, y: 120 });
@@ -260,10 +278,10 @@ export function cmosInverter(): Builder {
   b.wire({ x: 100, y: 90 }, { x: 160, y: 90 });
   b.wire({ x: 100, y: 130 }, { x: 100, y: 150 }); b.gnd({ x: 100, y: 150 });
   b.doc.junctions.push({ id: newId('j'), x: 160, y: 90 });
-  alias(b, 130, 90, 'IN'); alias(b, 200, 90, 'OUT');
+  alias(b, 120, 90, 'IN'); alias(b, 230, 90, 'OUT');
   b.doc.profile.dc = { enabled: true, source: 'VIN', start: '0', end: '5', incr: '0.01' };
   b.doc.profile.tran = tranP('5ns', '4us', '5ns');
-  vmark(b, 130, 90); vmark(b, 200, 90);
+  vmark(b, 150, 90); vmark(b, 260, 90);
   return b;
 }
 
@@ -343,6 +361,7 @@ const RAW_EXAMPLES: { name: string; make: () => SchematicDoc }[] = [
     b.doc.markers.push({ id: newId('m'), kind: 'V', x: 100, y: 60 });
     return b.doc;
   } },
+  { name: 'Maximum Power Transfer (DC sweep of RL)', make: () => maxPowerTransfer().doc },
   { name: 'VPULSE RC Charging', make: () => vpulseRC().doc },
   { name: 'D1N4001 Half-Wave Rectifier', make: () => halfWave().doc },
   { name: 'Zener Voltage Regulator', make: () => zenerReg().doc },

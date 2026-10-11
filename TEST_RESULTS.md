@@ -1,5 +1,68 @@
 # Test results — 2026-10-11 (ngspice-47, macOS arm64)
 
+0.6.1 (maximum power transfer): `npx tsc -p .` clean; `npm test` → 21 files, 238 tests, all passed; `npm run test:wasm` → 21 files, 238 tests, all passed; `npm run build` ok.
+tests/max-power.test.ts (11, real ngspice). Circuit: VS = 10 V, RS = 50 Ω, RL = {RL}. Expected
+P(RL) = VS²·RL/(RS+RL)², with a maximum of 0.5 W at 50 Ω, compared at every point to 1e-9:
+- Schematic DC Sweep of global parameter RL: linear 10–200 Ω (peak exactly at 50 Ω), decade 1 Ω–1 kΩ
+  (log axis), value list. Axis label "RL", unit Ω. The W marker on RL gives W(RL). No .dc line is written.
+- Schematic Parametric RL (bias point only) → "Bias point vs RL" plot, same curve.
+- Validation: undefined parameter error; TEMP → `.dc TEMP 0 100 50`; a source sweep with 10 000 points is still native.
+- Decade DC sweep of a source: V(OUT) = VS/2 at every point.
+- Netlist Mode: .DC PARAM, .DC LIN PARAM, .DC DEC PARAM, .DC PARAM … LIST, and .STEP + .OP give the same curve;
+  .STEP RS × .DC PARAM RL gives one curve per RS, each peaking at RL = RS. .DC LIN VS → `.dc VS …`;
+  .DC DEC VS → a helpful error.
+- Both new examples: peak 0.5 W at 50 Ω.
+Browser: the schematic example (DC sweep), the same circuit as a Parametric sweep, and the Netlist Mode example
+all draw W(RL) vs RL in Probe. The 40-point sweep takes about 0.43 s with native ngspice.
+
+0.6.0 (sources and semiconductors): `npx tsc -p .` clean; `npm test` (native ngspice-47) → 20 files, 226 tests, all passed; `npm run test:wasm` (ngspice-WebAssembly) → 20 files, 226 tests, all passed; `npm run build` ok.
+
+tests/devices.test.ts (44 tests, real ngspice; the expected values are computed independently in the test). Key simulated values:
+| Circuit | Check | Result |
+|---|---|---|
+| VAC RC low-pass 1 Hz–100 kHz | |H| and phase vs 1/(1+jf/fc) at all 251 points (1e-6 rel / 1e-4°); −3.0103 dB at 159.155 Hz ±0.2 % | pass (fc ≈ 159.14 Hz) |
+| VAC | `V1 IN 0 DC 0 AC 10 0`; no transient sine; DC sweep of a VAC; 30° phase → −15° at fc | pass |
+| VPULSE RC (1 ms τ) | waveform before TD, mid-rise, high, mid-fall, low, 2nd period; charge 10(1−e^(−t/τ)), discharge; I(R1)=(V(IN)−V(OUT))/1k; TR=TF=0 | pass |
+| VPULSE validation | TR+PW+TF > PER and negative TR → errors | pass |
+| D1N4001 forward (5 V, 1 kΩ) | V_D = N·Vt·ln(I/IS+1)+I·RS (1e-4 V) | pass |
+| D1N4001 reverse (−5 V) | I = −IS | pass |
+| D1N4001 DC sweep | monotonic; slope 1/(N·Vt); V_F(1 A) in 0.93–1.1 V | pass (0.957 V) |
+| Half-wave rectifier (10 V, 60 Hz) | peak 9.1–9.4 V; negative half-cycles < 1 mV | pass (9.303 V) |
+| Zener regulator | V_OUT 5.05–5.3 V; I_Z = (12−V)/1k − V/10k; I(D1:K), W(D1) = V·I; below BV plain divider; regulation | pass (5.119 V, 6.379 mA) |
+| NPN common-emitter | V_BE 0.6–0.72; KCL; β 95–115; KVL at the divider; |Av| = gm·(RC‖RL‖ro) ±5 % at 10 kHz; phase 180±3° | pass (VB 2.000, VC 5.769, VE 1.339 V, IC 1.326 mA, |Av| 157.5, −179.5°) |
+| NPN switch | cutoff I_C < 1 nA; saturation V_CE < 0.2 V; pulse response | pass |
+| PNP bias | V_E > V_B > V_C; I_C, I_B < 0, I_E > 0; KCL; V_EB 0.6–0.72; β | pass (VE 10.66, VB 10.00, VC 6.23 V, IC −1.326 mA) |
+| NMOS I_D(V_GS), I_D(V_DS) | 0 below VTO; square law / triode incl. (1+λV_DS), 1e-4 rel | pass |
+| NMOS body effect | V_SB = 2 V, γ = 0.5: VT = VTO + γ(√(2.6)−√0.6) | pass |
+| NMOS resistive load | triode point satisfies both equations | pass |
+| NMOS common-source | I_D from square law; |Av| = gm·(RD‖ro) ±1 %; phase 180±1° | pass (ID 1.134 mA, |Av| 9.739) |
+| PMOS switch (10 kΩ) | on > 4.8 V (exact triode check); off < 1 mV; I(M1:D) = −I(RL); KCL over D G S B | pass (4.877 V) |
+| PMOS resistive load (DC) | triode equation | pass |
+| CMOS inverter | V_OH > 4.999, V_OL < 1 mV, threshold 2.45–2.55 V; pulse inverted | pass (Vth 2.51 V) |
+| Parametric | ACMAG={Av}, V2={Vp}, W={Width}, VTO={vt}: every run uses its own value | pass |
+| Geometry | NPN switch identical I_C in all 8 orientations; all new parts' pins on grid, distinct, every orientation | pass |
+| Persistence / editing | 8 device examples save→reload → identical netlist; place 9 parts, edit, copy/paste, undo/redo | pass |
+| Probe | I(Q1:C), IC(Q1), IB(Q1), W(Q1) = Σ V·I; V(Q1)/I(Q1) give helpful errors; currents in AC → "not available"; Add Trace list | pass |
+| Netlist Mode | hand-written Q + NMOS + PMOS deck; I(M2:D) = −I(RL); ID(M2) < 0 | pass |
+| Part Browser | aliases NMOS/PMOS/NPN/1N4001; categories | pass |
+| Axis | DC sweep axis "V_VIN" | pass |
+
+Test-fixture corrections made while writing these tests (the code was not changed to fit them):
+- Four KCL/KVL checks at 1e-9 were tighter than ngspice's RELTOL = 1e-3. I confirmed the residual is solver
+  tolerance (5e-15 with reltol = 1e-6) and switched to RELTOL-based tolerances.
+- CS-amplifier r_o was written as (1+λV_DS)/g_ds; the correct value is 1/g_ds.
+- The NPN gain is now measured at 10 kHz: at 1 kHz the 100 µF bypass (1.6 Ω) shifts the phase by about 4°.
+- PMOS 1 kΩ on-voltage expectation (> 4.5 V) was wrong: the triode solution is 3.87 V. The example now uses
+  10 kΩ. The second gate-low window is 3–5 ms, not 5–7 ms.
+
+Found and fixed while testing: ngspice saves PMOS terminal currents in the device frame (the opposite of
+"into the terminal"). OpenSpice now flips them, and markers, Probe, bias display and Part Info agree with
+the series-resistor currents. Two examples had a label on the wrong net (PNP collector, PMOS output); fixed.
+
+Browser (dev server): all new symbols in 4 rotations × mirror (rotated-text fix); NPN example simulated from
+the GUI (bias V/I display, Probe DB(V(OUT)) about 43 dB); Part Browser alias search "nmos"; Import .model of a
+test card → netlist `.model QTEST NPN(...)` and a new bias point; CMOS inverter transient and DC transfer in Probe.
+
 0.5.2: `npx tsc -p .` clean; `npm test` (native ngspice) → 19 files, 182 tests, all passed; `npm run test:wasm` → 19 files, 182 tests, all passed; `npm run build` ok.
 - tests/review-regressions.test.ts (19): B01–B15 regressions. Real-ngspice checks: B06 alias "n0001" divider V = 6 V (exact to 1e-6); B07 F1 C+ marker = 1 mA; B08 C IC={V0}, V0=10: v(out) = 10·e^(−t/1 ms) at the first point and at 1 ms (UIC output starts at the first timestep, see KNOWN_ISSUES); unevaluable IC → error.
   Note: the WebAssembly engine under Node mis-detects a stubbed `window` as a browser between runs, so the simulation tests unstub it (browser builds run WASM in a Worker).

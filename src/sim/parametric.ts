@@ -3,7 +3,8 @@
 import { SchematicDoc, ParamSetup } from '../core/model';
 import { formatEng } from '../core/units';
 import { getDef } from '../core/library';
-import { runSchematic } from './schematicSim';
+import { runSchematic, paramUnit } from './schematicSim';
+import { combineOpPlots } from './sweepPlot';
 import { SimulationEngine, SimResult, SimStep } from './types';
 
 export { sweepValues, MAX_SWEEP_RUNS } from '../core/sweep';
@@ -56,5 +57,10 @@ export async function runParametric(
   }
   const first = steps.find(s => s.ok);
   const errors = steps.filter(s => !s.ok).map(s => `${s.label}: ${s.errors[0] ?? 'failed'}`);
-  return { result: { ok: !!first, plots: first?.plots ?? [], log, errors, elapsedMs: elapsed, steps }, deck };
+  // Bias point of every run against the swept value (e.g. W(RL) vs RL for maximum power transfer)
+  const xLabel = ps.varType === 'temp' ? 'TEMP' : ps.name.trim();
+  const unit = ps.varType === 'temp' ? '°C' : ps.varType === 'global' ? paramUnit(doc, ps.name) : /^I/i.test(ps.name.trim()) ? 'A' : 'V';
+  const sweep = combineOpPlots(steps.filter(s => s.ok).map(s => ({ value: s.value, plot: s.plots.find(p => p.kind === 'op') })),
+    `Bias point vs ${xLabel} (${steps.filter(s => s.ok).length} runs)`, xLabel, unit);
+  return { result: { ok: !!first, plots: first?.plots ?? [], log, errors, elapsedMs: elapsed, steps, sweepPlots: sweep ? [sweep] : undefined }, deck };
 }

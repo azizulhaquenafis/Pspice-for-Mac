@@ -83,11 +83,19 @@ export function evalForDisplay(plot: Plot, expr: string, devices: Map<string, De
   return { y, label: mode === 'db' ? `DB(${expr})` : mode === 'phase' ? `P(${expr})` : `M(${expr})` };
 }
 
-export function xAxis(plot: Plot): { x: Float64Array; label: string; log: boolean } {
+/** deck: the simulated netlist; for a DC sweep its .dc line names the swept source (ngspice calls the
+ *  sweep vector just "v-sweep"/"i-sweep"), labelled like PSpice: V_VIN. */
+export function xAxis(plot: Plot, deck = ''): { x: Float64Array; label: string; log: boolean; unit: string } {
   const v = plot.vectors[0];
-  const label = plot.kind === 'tran' ? 'Time (s)' : plot.kind === 'ac' ? 'Frequency (Hz)' : plot.kind === 'dc' ? `${v.name.replace(/^v\((.*)-sweep\)$/i, '$1').toUpperCase()} sweep` : v.name;
+  const src = /^\s*\.dc\s+(\S+)/im.exec(deck)?.[1];
+  const srcKind = !src ? 'v' : /^temp$/i.test(src) ? 't' : src[0].toLowerCase();
+  const dcLabel = plot.xLabel ?? (!src ? `${v.name.replace(/^v\((.*)-sweep\)$/i, '$1').toUpperCase()} sweep`
+    : srcKind === 't' ? 'TEMP' : srcKind === 'r' ? src.toUpperCase() : `${srcKind === 'i' ? 'I' : 'V'}_${src.toUpperCase()}`);
+  const unit = plot.xUnit ?? (plot.kind === 'tran' ? 's' : plot.kind === 'ac' ? 'Hz' : plot.kind === 'dc'
+    ? ({ t: '°C', r: 'Ω', i: 'A' } as Record<string, string>)[srcKind] ?? 'V' : '');
+  const label = plot.kind === 'tran' ? 'Time (s)' : plot.kind === 'ac' ? 'Frequency (Hz)' : plot.kind === 'dc' ? dcLabel : v.name;
   const x = v.re;
-  return { x, label, log: plot.kind === 'ac' && x.length > 2 && x[0] > 0 && Math.abs((x[2] / x[1]) - (x[1] / x[0])) < 1e-6 * (x[1] / x[0]) && x[1] / x[0] > 1.0001 };
+  return { x, label, unit, log: (plot.kind === 'ac' || plot.kind === 'dc') && x.length > 2 && x[0] > 0 && Math.abs((x[2] / x[1]) - (x[1] / x[0])) < 1e-6 * (x[1] / x[0]) && x[1] / x[0] > 1.0001 };
 }
 
 export function toCSV(x: Float64Array, xLabel: string, traces: { label: string; y: Float64Array }[]): string {

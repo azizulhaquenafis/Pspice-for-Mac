@@ -41,11 +41,14 @@ export function Probe() {
   const cirTraces = useStore(s => s.cirTraces);
   const cirProbes = useStore(s => s.cirProbes);
   // Analysis sections (transient / DC / AC) — taken from the first run; parametric runs share the same sections.
-  const basePlots = (result?.steps?.find(s => s.ok)?.plots ?? result?.plots ?? []).filter(p => p.kind !== 'op' && p.vectors[0].re.length > 1);
+  // ... plus sweep plots (bias point of every run vs the swept value), drawn as one curve
+  const basePlots = [...(result?.steps?.find(s => s.ok)?.plots ?? result?.plots ?? []), ...(result?.sweepPlots ?? [])]
+    .filter(p => p.kind !== 'op' && p.vectors[0].re.length > 1);
   const [plotIdx, setPlotIdx] = useState(0);
   const plot = basePlots[Math.min(plotIdx, basePlots.length - 1)];
   const runs = useMemo(() => {
     if (!plot) return [];
+    if (result?.sweepPlots?.includes(plot)) return [{ label: '', step: undefined as SimStep | undefined, plot }];
     if (result?.steps) return result.steps.filter(s => s.ok).map(s => ({ label: s.label, step: s as SimStep | undefined, plot: s.plots.find(p => p.title === plot.title) })).filter((r): r is { label: string; step: SimStep; plot: Plot } => !!r.plot);
     return [{ label: '', step: undefined as SimStep | undefined, plot }];
   }, [result, plot]);
@@ -64,7 +67,7 @@ export function Probe() {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 600, h: 300 });
 
-  const ax = plot ? xAxis(plot) : null;
+  const ax = plot ? xAxis(plot, deck) : null;
   const devices = useMemo(() => parseDeckDevices(deck), [deck]);
   const extra: string[] = source === 'schematic' ? (doc.probeTraces ?? [])
     : (cirTraces ?? (cirProbes.length ? cirProbes : plot ? availableTraces(plot, devices)[0].items.slice(0, 6) : []));
@@ -107,7 +110,7 @@ export function Probe() {
   })();
 
   const log = !!ax?.log;
-  const xUnit = plot?.kind === 'tran' ? 's' : plot?.kind === 'ac' ? 'Hz' : plot?.kind === 'dc' ? 'V' : '';
+  const xUnit = ax?.unit ?? '';
   const auto = useMemo<Range | null>(() => {
     if (!ax) return null;
     let y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity;

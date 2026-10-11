@@ -1,4 +1,42 @@
 # Changelog
+## 0.6.1 — 2026-10-11 (maximum power transfer / parameter sweeps of the bias point)
+- Fix: a Parametric sweep (schematic) or .STEP (Netlist Mode) whose only analysis is the bias point showed
+  no waveform, because each run is a single point. Probe now offers "Bias point vs <parameter>": every
+  run's bias point plotted against the swept value (e.g. W(RL) vs RL).
+- New: DC Sweep of a Global Parameter (PSpice's way to sweep a load resistance), plus Temperature, and
+  Octave / Decade / Value List sweep types. Linear source and TEMP sweeps still use ngspice .dc; parameter,
+  log and list sweeps run one bias point per value (up to 500) and are assembled into a DC plot. The x axis
+  is labelled with the parameter and its unit (RL, Ω, taken from the property that uses {RL}); decade sweeps
+  get a log axis.
+- Netlist Mode: PSpice .DC PARAM name start stop incr, .DC LIN|DEC|OCT PARAM ..., .DC PARAM name LIST ...;
+  .DC LIN <source> ... is passed to ngspice without LIN; unsupported forms (log/list sweeps of a source)
+  say what to use instead.
+- New examples: "Maximum Power Transfer (DC sweep of RL)" (schematic, power marker on RL) and "Maximum power
+  transfer (.DC PARAM)" (Netlist Mode).
+## 0.6.0 — 2026-10-11 (sources and semiconductors)
+- New parts, each with an original PSpice-style symbol and its own editable .model card (docs/MODELS.md):
+  D1N4001 (1N4001 rectifier, OpenSpice datasheet fit), ZENER (bent cathode bar, 5.1 V educational DZ5V1),
+  Dbreak (generic diode), QNPN / QPNP (C, B, E; emitter arrow out / in), MbreakN / MbreakP (four terminals
+  D, G, S, B; LEVEL=1; W, L, AD, AS, PD, PS). VAC and VPULSE were already present and are now fully tested.
+- Properties dialog: instance and model sections, "Import .model..." (paste a card; unknown parameters
+  go to EXTRA; the device type is checked), Reset to Default, show/hide the reference and value text, and
+  "(ngspice default)" for empty model fields. Model fields accept {parameters}, so they can be swept.
+- Netlist: one .model card per model name. Parts that share a name with different parameters get a private
+  name (warning), so no run reuses stale values. EXTRA parameters are validated.
+- VPULSE timing check: negative times, or TR + PW + TF longer than PER, are errors with an explanation.
+- Probe: terminal currents I(Q1:C/B/E), I(M1:D/G/S/B), the PSpice forms IC() IB() IE() ID() IG() IS(),
+  V(Q1:B), and W(Q1) = Σ V·I. All are "into the terminal"; the ngspice PMOS device-frame sign is corrected.
+  Currents ngspice does not save (AC) are reported as unavailable. A DC sweep axis is labelled with the
+  swept source (V_VIN).
+- Bias "I" display shows every transistor terminal current; Part Info lists terminal currents and power.
+- Part Browser: grouped by Sources / Passive / Diodes / BJT / MOSFET / Switches / Other; search covers
+  aliases (NMOS, PMOS, NPN, PNP, 1N4001, QbreakN, ...); the preview is fitted to the symbol, with pin names
+  and model. The part-name box on the toolbar accepts the aliases too.
+- Rotated transistors place their text beside the body, clear of the pin leads; the reference stays above
+  the model name.
+- Nine new or renamed examples in File ▸ Open Example: VAC RC Low-Pass Filter, VPULSE RC Charging,
+  D1N4001 Half-Wave Rectifier, Zener Voltage Regulator, NPN Common-Emitter Amplifier, PNP Transistor Bias,
+  NMOS Common-Source Amplifier, PMOS Switching Circuit, CMOS Inverter.
 ## 0.5.2 — 2026-10-11
 - New: Transient Print Step auto-fix. 0 / negative, larger than Final Time, or far too fine (> 100,000 points per
   run, e.g. 1 ns or 1 ps for 1 ms) becomes a 1-2-5 value near Final Time / 1000 (1 ms → 1 µs); a Print Step that

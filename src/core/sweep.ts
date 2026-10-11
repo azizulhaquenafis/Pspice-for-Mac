@@ -3,8 +3,11 @@ import { ParamSetup } from './model';
 import { parseSpiceNumber } from './units';
 
 export const MAX_SWEEP_RUNS = 50;
+/** DC sweeps of a global parameter run one (cheap) bias point per value: a larger limit. */
+export const MAX_DC_POINTS = 500;
 
-export function sweepValues(ps: ParamSetup): { values: number[]; error?: string } {
+export function sweepValues(ps: Pick<ParamSetup, 'sweep' | 'start' | 'end' | 'incr' | 'values'>, max = MAX_SWEEP_RUNS): { values: number[]; error?: string } {
+  const MAX_SWEEP_RUNS = max;
   const n = (s: string, what: string) => { const r = parseSpiceNumber(s); if (!r.ok) throw new Error(`${what}: ${r.error}`); return r.value; };
   try {
     let values: number[] = [];

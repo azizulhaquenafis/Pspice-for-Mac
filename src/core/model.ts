@@ -27,7 +27,12 @@ export interface Label { id: string; x: number; y: number; text: string; kind: '
 export interface Marker { id: string; kind: 'V' | 'I' | 'VD' | 'W'; x: number; y: number; x2?: number; y2?: number; partId?: string; pin?: string }
 
 export interface TranSetup { enabled: boolean; printStep: string; finalTime: string; noPrint: string; stepCeiling: string; uic: boolean }
-export interface DcSetup { enabled: boolean; source: string; start: string; end: string; incr: string }
+/** PSpice DC Sweep. varType: voltage/current source (default), global parameter or temperature;
+ *  `source` holds the source / parameter name. sweep: linear (default), octave, decade or value list. */
+export interface DcSetup {
+  enabled: boolean; source: string; start: string; end: string; incr: string;
+  varType?: 'source' | 'global' | 'temp'; sweep?: 'lin' | 'oct' | 'dec' | 'list'; values?: string;
+}
 export interface AcSetup { enabled: boolean; sweep: 'lin' | 'oct' | 'dec'; points: string; start: string; end: string }
 /** PSpice "Parametric": repeat the enabled analyses for each value of a global parameter, source value or temperature. */
 export interface ParamSetup {
@@ -70,7 +75,7 @@ export function defaultProfile(): SimProfile {
     name: 'Schematic1',
     op: true,
     tran: { enabled: false, printStep: '20ns', finalTime: '1000ns', noPrint: '0', stepCeiling: '', uic: false },
-    dc: { enabled: false, source: 'V1', start: '0', end: '10', incr: '1' },
+    dc: { enabled: false, source: 'V1', start: '0', end: '10', incr: '1', varType: 'source', sweep: 'lin', values: '' },
     ac: { enabled: false, sweep: 'dec', points: '101', start: '10', end: '1Meg' },
     param: { enabled: false, varType: 'global', name: 'Rh', sweep: 'list', start: '1', end: '10', incr: '1', values: '1 10 100' },
   };

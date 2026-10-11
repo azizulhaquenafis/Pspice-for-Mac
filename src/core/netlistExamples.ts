@@ -43,6 +43,15 @@ C1 OUT 0 1u
 .AC DEC 50 1 100k
 .END
 ` },
+  { name: 'Maximum power transfer (.DC PARAM)', text: `Maximum power transfer: P(RL) = VS^2 RL/(RS+RL)^2, max 0.5 W at RL = RS = 50
+VS IN 0 DC 10
+RS IN OUT 50
+RL OUT 0 {RL}
+.PARAM RL=50
+.DC PARAM RL 5 200 5
+.PROBE W(RL)
+.END
+` },
   { name: 'Parameter sweep (.STEP PARAM)', text: `Divider with stepped load resistor
 .PARAM RL=3k
 V1 IN 0 DC 10

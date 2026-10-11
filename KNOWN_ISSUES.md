@@ -27,3 +27,17 @@
 - E/F/G/H parts saved with 0.4.1–0.4.2 had output pins at x = 60; they are now at x = 40 again — reconnect those output wires.
 - .sch import is built from the documented PSpice 9.1 layout and tested on a hand-made file; real course files may contain constructs not handled yet — please send one. PSpice symbol libraries (.slb) are proprietary, so OpenSpice symbols are aligned to the imported wires (reported in the import report). Only page 1 is imported.
 - The Print Step auto-fix changes only the simulated deck; the Transient dialog keeps the value you typed (the warning shows the value used).
+- Device currents reported by ngspice close KCL/KVL to RELTOL = 0.001 (the PSpice default too). For example,
+  the Zener current differs from (V_S − V_Z)/R by about 0.15 % at the default; with .option reltol=1e-6 the
+  difference vanishes. Simulation options are not editable in the schematic yet (use Netlist Mode).
+- ngspice does not save device currents in AC sweeps, so current markers and I(...) traces are unavailable in AC.
+- Shipped device models are educational, or an OpenSpice datasheet fit for D1N4001 (docs/MODELS.md). They are
+  not vendor models; paste a vendor card with Import .model if you have one you may use.
+- BJTs have no substrate pin (3-terminal C B E). MOSFETs are 4-terminal only (no MbreakN3-style 3-pin part).
+- .sch import of transistors and the new diodes is untested (no reference file); check the import report.
+- The netlist writes numbers in plain decimal form (W=0.00001, not 10u). This is numerically identical.
+- DC sweeps of a global parameter (and log/list DC sweeps) run one ngspice bias point per value. They are limited
+  to 500 points and are slower than a native .dc (about 10 ms per point natively; more with WebAssembly).
+  A nested DC sweep and Model Parameter sweeps are not yet available.
+- In such stepped DC sweeps capacitor/inductor IC= attributes are ignored (a DC sweep is a series of bias points).
+- In Netlist Mode, .DC PARAM cannot be nested with a second sweep on the same line; .STEP + .DC PARAM works.
