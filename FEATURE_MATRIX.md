@@ -13,7 +13,7 @@
 | Editor | Undo/redo all edits; cut/copy/paste | ✅ |
 | Editor | Net highlight on wire click | ✅ |
 | Editor | Zoom in/out/fit/selection/page, wheel pan, pinch/ctrl-wheel zoom | ✅ |
-| Editor | Zoom area, bus, blocks, multi-page, find | ⛔ |
+| Editor | Bus, blocks, multi-page, find | ⛔ |
 | Parts | R, C (IC), L (IC), VDC, IDC, VSIN, VPULSE, VAC, VPWL, D1N4148, E (VCVS), G (VCCS), AGND, GND_EARTH | ✅ |
 | Parts | Sw_tClose / Sw_tOpen time-controlled switches, redrawn (contacts, blade = initial state, arc arrow), all rotations/mirror | ✅ (switch tests + screenshots) |
 | Parts | PARAM (PARAMETERS block, 3 name/value slots per block, multiple blocks) | ✅ |
@@ -37,7 +37,7 @@
 | Netlist Mode | Generated / edited / independent provenance; netlist saved inside .osch | ✅ |
 | Netlist Mode | .LIB/.INC files, .FOUR, .TF, .SENS, .NOISE, .STEP of sources/models | ⛔ (reported as errors) |
 | Parts | BUBBLE connector (connect by LABEL, '0' = ground) | ✅ (bubble tests) |
-| Parts | E, F, G, H dependent sources (PSpice-style symbols; F/H current sensing via 0 V source) | ✅ (dependent tests) |
+| Parts | E, F, G, H dependent sources (PSpice-style symbols; F/H control current sensing via 0 V source, incl. `C+`/`C-` markers & expressions) | ✅ (dependent + all-components tests) |
 | Parts | BJT, MOSFET, op-amp, switches, coupled L/transformer, polarized C, Zener, IAC/ISIN/IPULSE | ⛔ |
 | Netlist | Graph connectivity, node 0, aliases, ERC (floating pin, no ground, duplicate ref, bad values) | ✅ |
 | Netlist | Netlist viewer / copy / export (.cir) | ✅ |
@@ -49,7 +49,7 @@
 | Netlist editor | .LIB/.INC files, .STEP, .FOUR, .MEAS, .TF, .SENS, .NOISE | ⛔ (reported as errors) |
 | Netlist | View generated + last simulated deck, Open in Netlist Editor, Probe ▸ Netlist button | ✅ |
 | Sim | DC sweep (linear, V/I source) | ✅ (Test E) |
-| Sim | Client-side ngspice-46 WebAssembly in Web Worker (split `.wasm` streaming, static Vercel deploy, no backend) | ✅ (Chrome/Firefox + 170 automated tests) |
+| Sim | Client-side ngspice-46 WebAssembly in Web Worker (split `.wasm` streaming, static Vercel deploy, no backend) | ✅ (Chrome/Firefox + 183 automated tests) |
 | Sim | AC sweep (lin/oct/dec) with exact R/C/L/D/G/F/S/I/V/E/H complex branch currents | ✅ (Test F + AC branch-current tests vs native) |
 | Sim | Cancel simulation (queued + in-flight), 30 s timeout, worker crash recovery, lightweight diagnostics | ✅ (automated + GUI tests) |
 | Sim | Parametric, temperature, sensitivity, TF, noise, Fourier, Monte Carlo, nested sweep | ⛔ |

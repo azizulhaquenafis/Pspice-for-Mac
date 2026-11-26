@@ -8,19 +8,33 @@
 import { Plot, getVector } from './types';
 import { parseSpiceNumber } from '../core/units';
 
-export interface Device { name: string; nodes: string[] }
+export interface Device { name: string; nodes: string[]; ctrlNodes?: [string, string] }
 export interface Val { re: Float64Array; im: Float64Array | null }
 
 /** Device name -> nodes, parsed from the simulated deck (works for schematic and .cir runs). */
 export function parseDeckDevices(deck: string): Map<string, Device> {
   const m = new Map<string, Device>();
+  const senseNodes = new Map<string, [string, string]>();
   deck.split('\n').forEach((raw, i) => {
     const l = raw.trim();
     if (i === 0 || !l || '*.;+'.includes(l[0])) return;
     const t = l.split(/\s+/);
-    if (t.length < 3 || t[0].includes('__') || !/^[rclvidegfhs]/i.test(t[0])) return;
-    m.set(t[0].toLowerCase(), { name: t[0], nodes: [t[1].toLowerCase(), t[2].toLowerCase()] });
+    if (t.length < 3) return;
+    const sm = /^v__sense_(.+)$/i.exec(t[0]);
+    if (sm) {
+      senseNodes.set(sm[1].toLowerCase(), [t[1].toLowerCase(), t[2].toLowerCase()]);
+      return;
+    }
+    if (t[0].includes('__') || !/^[rclvidegfhs]/i.test(t[0])) return;
+    const key = t[0].toLowerCase();
+    const ctrlNodes: [string, string] | undefined =
+      /^[eg]/i.test(t[0]) && t.length >= 5 ? [t[3].toLowerCase(), t[4].toLowerCase()] : undefined;
+    m.set(key, { name: t[0], nodes: [t[1].toLowerCase(), t[2].toLowerCase()], ctrlNodes });
   });
+  for (const [devKey, nodes] of senseNodes) {
+    const d = m.get(devKey);
+    if (d && !d.ctrlNodes) d.ctrlNodes = nodes;
+  }
   return m;
 }
 
@@ -76,7 +90,7 @@ export function evaluateExpr(expr: string, plot: Plot, devices: Map<string, Devi
     const p = pin.toLowerCase();
     if (['1', '+', 'a', 'p', 'n+'].includes(p)) return 0;
     if (['2', '-', 'k', 'n', 'n-'].includes(p)) return 1;
-    return fail(`Unknown pin "${pin}" (use 1/2, +/-, A/K)`);
+    return fail(`Unknown pin "${pin}" (use 1/2, +/-, A/K, C+/C-)`);
   };
   const nodeV = (spec: string): Val => {
     const s = spec.trim();
@@ -84,6 +98,11 @@ export function evaluateExpr(expr: string, plot: Plot, devices: Map<string, Devi
     const pm = /^(.+):(.+)$/.exec(s);
     if (pm) {
       const d = device(pm[1]) ?? fail(`No device "${pm[1]}"`);
+      const p = pm[2].toLowerCase();
+      if (p === 'c+' || p === 'c-') {
+        if (!d.ctrlNodes) return fail(`Device "${d.name}" has no control pins (${pm[2]})`);
+        return nodeV(d.ctrlNodes[p === 'c+' ? 0 : 1]);
+      }
       return nodeV(d.nodes[pinIndex(pm[2])]);
     }
     const v = vec(`v(${s})`);
@@ -95,6 +114,10 @@ export function evaluateExpr(expr: string, plot: Plot, devices: Map<string, Devi
   const current = (spec: string): Val => {
     const pm = /^(.+):(.+)$/.exec(spec.trim());
     const d = device(pm ? pm[1] : spec) ?? fail(`No device "${pm ? pm[1] : spec}"`);
+    if (pm && (pm[2].toLowerCase() === 'c+' || pm[2].toLowerCase() === 'c-')) {
+      const sv = vec(`i(v__sense_${d.name.toLowerCase()})`) ?? fail(`Control current of ${d.name} is not available in this analysis`);
+      return pm[2].toLowerCase() === 'c-' ? neg(sv) : sv;
+    }
     const vn = deviceCurrentVec(d.name);
     const v = (vn ? vec(vn) : null) ?? fail(`Current of ${d.name} is not available in this analysis`);
     return pm && pinIndex(pm[2]) === 1 ? neg(v) : v;

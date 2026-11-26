@@ -4,9 +4,9 @@ import { LIBRARY, getDef } from '../core/library';
 import { SymbolBody } from './Symbol';
 import { parseSpiceNumber, formatEng } from '../core/units';
 import { isBraced, unbrace, tokenize } from '../core/params';
-import { currentVector } from '../core/netlist';
+import { currentVector, generateNetlist } from '../core/netlist';
 import { newId, SimProfile } from '../core/model';
-import { createNetlist, download, simulate, schematicToNetlistEditor, getEngineDiagnostics } from '../state/actions';
+import { download, simulate, schematicToNetlistEditor, getEngineDiagnostics } from '../state/actions';
 
 export function Dialog({ title, children, onClose, width = 360, buttons }: { title: string; children: ReactNode; onClose: () => void; width?: number; buttons?: ReactNode }) {
   return (
@@ -185,8 +185,14 @@ export function AnalysisSetup() {
 export function ParamDialog() {
   const p = useStore(s => s.doc.profile.param);
   const [v, setV] = useState(p);
-  const params = useStore(s => s.doc.parts.flatMap(q => getDef(q.type).isParam ? [1, 2, 3].map(i => q.props[`NAME${i}`]?.trim()).filter(Boolean) as string[] : []));
-  const srcs = useStore(s => s.doc.parts.filter(q => ['V', 'I'].includes(getDef(q.type).spiceLetter)).map(q => q.ref));
+  const parts = useStore(s => s.doc.parts);
+  const initialSrcKind = useMemo<'V' | 'I'>(() => {
+    const match = parts.find(q => q.ref.toUpperCase() === p.name.trim().toUpperCase());
+    return match && getDef(match.type).spiceLetter === 'I' ? 'I' : 'V';
+  }, [parts, p.name]);
+  const [srcKind, setSrcKind] = useState<'V' | 'I'>(initialSrcKind);
+  const params = useMemo(() => parts.flatMap(q => getDef(q.type).isParam ? [1, 2, 3].map(i => q.props[`NAME${i}`]?.trim()).filter(Boolean) as string[] : []), [parts]);
+  const srcs = useMemo(() => parts.filter(q => getDef(q.type).spiceLetter === srcKind).map(q => q.ref), [parts, srcKind]);
   const sv = sweepValues(v);
   const back = () => useStore.getState().setDialog('analysis');
   const ok = () => { if (sv.error) return; setProf(pp => ({ ...pp, param: { ...v, enabled: true } })); back(); };
@@ -197,9 +203,9 @@ export function ParamDialog() {
       <button className="default" disabled={!!sv.error} onClick={ok}>OK</button><button onClick={back}>Cancel</button></>}>
       <div className="dc-grid">
         <fieldset><legend>Swept Var. Type</legend>
-          {radio('Voltage Source', v.varType === 'source', () => setV({ ...v, varType: 'source' }))}
+          {radio('Voltage Source', v.varType === 'source' && srcKind === 'V', () => { setSrcKind('V'); setV({ ...v, varType: 'source' }); })}
           {radio('Temperature', v.varType === 'temp', () => setV({ ...v, varType: 'temp' }))}
-          {radio('Current Source', false, () => setV({ ...v, varType: 'source' }))}
+          {radio('Current Source', v.varType === 'source' && srcKind === 'I', () => { setSrcKind('I'); setV({ ...v, varType: 'source' }); })}
           {radio('Model Parameter', false, null)}
           {radio('Global Parameter', v.varType === 'global', () => setV({ ...v, varType: 'global' }))}
         </fieldset>
@@ -313,8 +319,9 @@ export function AcDialog() {
 }
 
 export function NetlistViewer() {
-  const nl = useMemo(() => createNetlist(), []);
-  const title = useStore(s => s.doc.title);
+  const doc = useStore(s => s.doc);
+  const nl = useMemo(() => generateNetlist(doc), [doc]);
+  const title = doc.title;
   const sim = useStore(s => s.sim);
   const hasRun = !!sim.result && !sim.stale && !!sim.netlist;
   const [tab, setTab] = useState<'generated' | 'simulated'>(hasRun ? 'simulated' : 'generated');
@@ -337,7 +344,8 @@ export function NetlistViewer() {
 }
 
 function Diagnostics() {
-  const nl = useMemo(() => createNetlist(), []);
+  const doc = useStore(s => s.doc);
+  const nl = useMemo(() => generateNetlist(doc), [doc]);
   if (!nl.diagnostics.length) return <div className="ok-msg">No ERC errors or warnings.</div>;
   return <ul className="diags">{nl.diagnostics.map((d, i) => <li key={i} className={d.level}>{d.level.toUpperCase()}: {d.message}</li>)}</ul>;
 }
@@ -388,7 +396,7 @@ export function AboutDialog() {
 export function PartInfoDialog({ partId }: { partId: string }) {
   const doc = useStore(s => s.doc), sim = useStore(s => s.sim);
   const p = doc.parts.find(q => q.id === partId);
-  const nl = useMemo(() => createNetlist(), []);
+  const nl = useMemo(() => generateNetlist(doc), [doc]);
   if (!p) return null;
   const def = getDef(p.type);
   const name = nl.spiceName.get(p.id) ?? p.ref;

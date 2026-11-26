@@ -27,7 +27,7 @@ export function markerExprs(doc: SchematicDoc): (string | null)[] {
     if (m.kind === 'W') return `W(${p.ref})`;
     if (!m.pin) return null;
     const cv = currentVector(p, m.pin, spiceNameFor(p));
-    return cv ? `${cv.sign < 0 ? '-' : ''}I(${p.ref})` : null;
+    return cv ? cv.label : null;
   });
 }
 
@@ -44,6 +44,9 @@ export function availableTraces(plot: Plot, devices: Map<string, Device>): Trace
     const cv = deviceCurrentVec(d.name);
     const hasI = !!(cv && getVector(plot, cv));
     if (hasI) currents.push(`I(${d.name})`);
+    if (/^[fh]/i.test(d.name) && getVector(plot, `i(v__sense_${d.name.toLowerCase()})`)) {
+      currents.push(`I(${d.name}:C+)`);
+    }
     const src = /^[vi]/i.test(d.name);
     across.push(src ? `V(${d.name}:+,${d.name}:-)` : `V(${d.name}:1,${d.name}:2)`);
     if (hasI) power.push(`W(${d.name})`);

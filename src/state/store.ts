@@ -149,14 +149,14 @@ export const useStore = create<State>((set, get) => ({
     set({ doc: next, past: [...past.slice(-MAX_UNDO), doc], future: [], dirty: true, ...(msg ? { status: msg } : {}) });
   },
   undo() {
-    const { past, doc, future } = get();
+    const { past, doc, future, sim } = get();
     if (!past.length) return set({ status: 'Nothing to undo' });
-    set({ doc: past[past.length - 1], past: past.slice(0, -1), future: [doc, ...future], sel: emptySel(), dirty: true, status: 'Undo' });
+    set({ doc: past[past.length - 1], past: past.slice(0, -1), future: [doc, ...future], sel: emptySel(), dirty: true, sim: { ...sim, stale: true }, status: 'Undo' });
   },
   redo() {
-    const { past, doc, future } = get();
+    const { past, doc, future, sim } = get();
     if (!future.length) return set({ status: 'Nothing to redo' });
-    set({ doc: future[0], future: future.slice(1), past: [...past, doc], sel: emptySel(), dirty: true, status: 'Redo' });
+    set({ doc: future[0], future: future.slice(1), past: [...past, doc], sel: emptySel(), dirty: true, sim: { ...sim, stale: true }, status: 'Redo' });
   },
   setTool(t) {
     const msg: Record<string, string> = {

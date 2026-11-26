@@ -1,6 +1,10 @@
-# Test results — 2026-11-25 (v0.5.1 production audit: ngspice-46 split-WASM via @o.z/ngspice-wasm@0.0.0, cross-checked vs native ngspice-47 on macOS arm64)
+# Test results — 2026-11-26 (v0.5.2 all-20-component & UI function audit: ngspice-46 split-WASM via @o.z/ngspice-wasm@0.0.0)
 
-`npm test` → **18 files, 170 tests, all passed** (after `npm ci` & `npx tsc -p .`).
+`npm test` → **19 files, 183 tests, all passed** (after `npx tsc -p .` & `npm run build`).
+
+## 0.5.2 — Exhaustive 20-Component & Interactive UI Verification (`tests/all-components.test.ts` + live browser on `http://localhost:4175/`)
+- **All 20 library components verified end-to-end (Part Browser preview + netlist + ngspice-46 WASM + Probe):** `R`, `C`, `L`, `VDC`, `IDC` (incl. parametric current sweep), `VSIN`, `VPULSE`, `VAC`, `VPWL`, `D1N4148` (OP + AC small-signal current), `E` (VCVS), `F` (CCCS + `C+`/`C-` current markers/expressions), `G` (VCCS), `H` (CCVS + `C+`/`C-` current markers/expressions), `Sw_tClose`, `Sw_tOpen`, `PARAM`, `BUBBLE`, `AGND`, `GND_EARTH`.
+- **Live GUI deep pass (`http://localhost:4175/`):** Built & wired a `VDC + R + D1N4148 + AGND + GND_EARTH` circuit from scratch (`VA = 695.7 mV`), tested Rotate/Flip/Copy/Paste/Delete, Net Alias/Text/Junction, Part `Information` (`V/I/P`), all 4 markers (`V`, `VD`, `I`, `W`) + `Clear All`, `Zoom Area` / `Entire Page` / `Redraw`, Undo clearing stale bias overlay, all 4 Analysis Setup sub-dialogs (`Current Source` radio fix verified), Probe `Section Information` + `Details >>`, `Trace Property`, `Hide`/`Unhide All`, `Cursor Max`/`Min`, `Label: Mark`/`Delete All Marks`, `Black Background` toggle, derived `W(R2)` trace, `CSV` & `PNG` downloads, `Maximize`/`Restore`, Netlist Mode `View Simulated Deck` fix (shows actual `.STEP` deck), `Find / Replace All` + Undo, and `.SUBCKT`/`X`/`Q`/`M`/`K`/`.MEAS`/`.STEP TEMP` deck. **0 console errors, 0 React warnings, 0 failed network requests, 0 `/api/simulate` hits.**
 
 ## 0.5.1 — Production Audit, AC Branch Currents, Performance & Memory Stress Tests (`tests/production-audit.test.ts`)
 
