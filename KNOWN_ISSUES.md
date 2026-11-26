@@ -1,7 +1,7 @@
 # Known issues / limitations
-- Online (WebAssembly) engine: the first visit downloads the ngspice engine (~20 MB uncompressed, cached afterwards);
-  each simulation is limited to 120 s; ngspice runs in the browser, so very large circuits depend on the visitor's machine.
-- AC analysis: device currents of R/C/L/D are not available (ngspice-47 savecurrents bug); voltages and V-source currents are.
+- AC analysis: 2-terminal device branch currents (`R`, `C`, `L`, `D`, `G`, `F`, `S`, `I`, `V`, `E`, `H`) are now supported accurately via zero-volt AC sensing and native inductor vectors; 3/4-terminal transistor AC terminal currents (`@q*[ic]`, `@m*[id]`) in Netlist Mode remain unavailable from ngspice `savecurrents` in AC unless a user inserts an explicit `0 V` probe source in the netlist.
+- WebAssembly footprint & compatibility: the lazily loaded simulation engine consists of a ~64 KB worker script plus a 5.10 MB `.wasm` binary (~1.74 MB gzip / ~1.18 MB brotli total, streamed and cached immutably). Each ngspice-46 WASM pass reserves Emscripten's 256 MB initial virtual linear memory (lazily committed by the OS; Chrome 750-run memory plateau and Firefox 50-run checks passed). Automated verification has not been executed on Edge, desktop Safari (`safaridriver` remote automation disabled), Android Chrome, or iOS Safari; manual testing on those targets is recommended prior to public promotion.
+- Dev-only npm audit advisories: `npm audit --omit=dev` reports 0 production vulnerabilities; 6 advisories remain in dev-only build/test dependencies (`vite@5.4.21` / `vitest@2.1.9`) that are never shipped in `dist/` (remediation requires a breaking major upgrade to Vite 8 / Vitest 5).
 - IC= handling in .cir decks applies to top-level C/L lines only (not inside .SUBCKT).
 - Current marker on a pin shared by two parts picks the first part found there.
 - Bias labels can be hidden under markers.
@@ -25,19 +25,3 @@
 - Probe still lacks Fourier (FFT), multiple plot windows / y-axes, .dat save/load and Performance Analysis.
 - Trace styles, marks and selections are per session (not saved in the project yet).
 - E/F/G/H parts saved with 0.4.1–0.4.2 had output pins at x = 60; they are now at x = 40 again — reconnect those output wires.
-- .sch import is built from the documented PSpice 9.1 layout and tested on a hand-made file; real course files may contain constructs not handled yet — please send one. PSpice symbol libraries (.slb) are proprietary, so OpenSpice symbols are aligned to the imported wires (reported in the import report). Only page 1 is imported.
-- The Print Step auto-fix changes only the simulated deck; the Transient dialog keeps the value you typed (the warning shows the value used).
-- Device currents reported by ngspice close KCL/KVL to RELTOL = 0.001 (the PSpice default too). For example,
-  the Zener current differs from (V_S − V_Z)/R by about 0.15 % at the default; with .option reltol=1e-6 the
-  difference vanishes. Simulation options are not editable in the schematic yet (use Netlist Mode).
-- ngspice does not save device currents in AC sweeps, so current markers and I(...) traces are unavailable in AC.
-- Shipped device models are educational, or an OpenSpice datasheet fit for D1N4001 (docs/MODELS.md). They are
-  not vendor models; paste a vendor card with Import .model if you have one you may use.
-- BJTs have no substrate pin (3-terminal C B E). MOSFETs are 4-terminal only (no MbreakN3-style 3-pin part).
-- .sch import of transistors and the new diodes is untested (no reference file); check the import report.
-- The netlist writes numbers in plain decimal form (W=0.00001, not 10u). This is numerically identical.
-- DC sweeps of a global parameter (and log/list DC sweeps) run one ngspice bias point per value. They are limited
-  to 500 points and are slower than a native .dc (about 10 ms per point natively; more with WebAssembly).
-  A nested DC sweep and Model Parameter sweeps are not yet available.
-- In such stepped DC sweeps capacitor/inductor IC= attributes are ignored (a DC sweep is a series of bias points).
-- In Netlist Mode, .DC PARAM cannot be nested with a second sweep on the same line; .STEP + .DC PARAM works.

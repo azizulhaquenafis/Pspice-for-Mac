@@ -1,87 +1,17 @@
 # Changelog
-## 0.6.1 — 2026-10-11 (maximum power transfer / parameter sweeps of the bias point)
-- Fix: a Parametric sweep (schematic) or .STEP (Netlist Mode) whose only analysis is the bias point showed
-  no waveform, because each run is a single point. Probe now offers "Bias point vs <parameter>": every
-  run's bias point plotted against the swept value (e.g. W(RL) vs RL).
-- New: DC Sweep of a Global Parameter (PSpice's way to sweep a load resistance), plus Temperature, and
-  Octave / Decade / Value List sweep types. Linear source and TEMP sweeps still use ngspice .dc; parameter,
-  log and list sweeps run one bias point per value (up to 500) and are assembled into a DC plot. The x axis
-  is labelled with the parameter and its unit (RL, Ω, taken from the property that uses {RL}); decade sweeps
-  get a log axis.
-- Netlist Mode: PSpice .DC PARAM name start stop incr, .DC LIN|DEC|OCT PARAM ..., .DC PARAM name LIST ...;
-  .DC LIN <source> ... is passed to ngspice without LIN; unsupported forms (log/list sweeps of a source)
-  say what to use instead.
-- New examples: "Maximum Power Transfer (DC sweep of RL)" (schematic, power marker on RL) and "Maximum power
-  transfer (.DC PARAM)" (Netlist Mode).
-## 0.6.0 — 2026-10-11 (sources and semiconductors)
-- New parts, each with an original PSpice-style symbol and its own editable .model card (docs/MODELS.md):
-  D1N4001 (1N4001 rectifier, OpenSpice datasheet fit), ZENER (bent cathode bar, 5.1 V educational DZ5V1),
-  Dbreak (generic diode), QNPN / QPNP (C, B, E; emitter arrow out / in), MbreakN / MbreakP (four terminals
-  D, G, S, B; LEVEL=1; W, L, AD, AS, PD, PS). VAC and VPULSE were already present and are now fully tested.
-- Properties dialog: instance and model sections, "Import .model..." (paste a card; unknown parameters
-  go to EXTRA; the device type is checked), Reset to Default, show/hide the reference and value text, and
-  "(ngspice default)" for empty model fields. Model fields accept {parameters}, so they can be swept.
-- Netlist: one .model card per model name. Parts that share a name with different parameters get a private
-  name (warning), so no run reuses stale values. EXTRA parameters are validated.
-- VPULSE timing check: negative times, or TR + PW + TF longer than PER, are errors with an explanation.
-- Probe: terminal currents I(Q1:C/B/E), I(M1:D/G/S/B), the PSpice forms IC() IB() IE() ID() IG() IS(),
-  V(Q1:B), and W(Q1) = Σ V·I. All are "into the terminal"; the ngspice PMOS device-frame sign is corrected.
-  Currents ngspice does not save (AC) are reported as unavailable. A DC sweep axis is labelled with the
-  swept source (V_VIN).
-- Bias "I" display shows every transistor terminal current; Part Info lists terminal currents and power.
-- Part Browser: grouped by Sources / Passive / Diodes / BJT / MOSFET / Switches / Other; search covers
-  aliases (NMOS, PMOS, NPN, PNP, 1N4001, QbreakN, ...); the preview is fitted to the symbol, with pin names
-  and model. The part-name box on the toolbar accepts the aliases too.
-- Rotated transistors place their text beside the body, clear of the pin leads; the reference stays above
-  the model name.
-- Nine new or renamed examples in File ▸ Open Example: VAC RC Low-Pass Filter, VPULSE RC Charging,
-  D1N4001 Half-Wave Rectifier, Zener Voltage Regulator, NPN Common-Emitter Amplifier, PNP Transistor Bias,
-  NMOS Common-Source Amplifier, PMOS Switching Circuit, CMOS Inverter.
-## 0.5.2 — 2026-10-11
-- New: Transient Print Step auto-fix. 0 / negative, larger than Final Time, or far too fine (> 100,000 points per
-  run, e.g. 1 ns or 1 ps for 1 ms) becomes a 1-2-5 value near Final Time / 1000 (1 ms → 1 µs); a Print Step that
-  would overflow 200,000 stored points across a sweep is raised to the finest 1-2-5 value that fits. Each fix is
-  shown as a warning/note. Applies to the schematic Transient dialog and to .TRAN in Netlist Mode.
-- Fixes from the external review (B01–B15):
-  - B01 Save after New/Open no longer overwrites the previous document's file (file handles are per document session).
-  - B02 Creating a netlist preview no longer replaces the deck paired with the shown result.
-  - B03 Undo/redo and .cir edits mark results stale exactly when the simulated circuit differs.
-  - B04 New/Open cancel an in-flight run; late results from an old run or document are discarded (run IDs).
-  - B05 Copy/Cut/Paste keep junctions and markers; current/power markers follow their pasted part.
-  - B06 A net alias spelled like an automatic node name (e.g. n0001) no longer merges with an unlabelled net.
-  - B07 A current marker on an F/H control pin (C+/C−) plots the control current.
-  - B08 Netlist Mode honours IC={expression} using top-level .PARAM values; unevaluable ICs are errors.
-  - B09 SIN/COS of complex (AC) values use the complex identities.
-  - B10 Opening a .osch validates every object (ids, coordinates, properties, markers, view) before replacing the document.
-  - B11 Probe axis dialog shows 1 MHz as 1Meg (it parsed back as 1 mHz).
-  - B12 Log axis decade generation is bounded and empty for non-positive ranges.
-  - B13 An edit made while a save is being written stays marked unsaved.
-  - B14 CSV export writes every point of the visible traces (no truncation to the first axis length).
-  - B15 A run cancelled before it starts does no work on any backend; abort listeners are removed per pass.
-## 0.5.1 — 2026-10-11
-- New: File ▸ Import PSpice Schematic (.sch) (also accepted by File ▸ Open). Reads MicroSim/PSpice Schematics
-  8–9.1 text files: parts and ports with attributes (REFDES, VALUE, DC, source/switch/gain/IC parameters),
-  wires, wire labels, junctions, and the Transient / DC Sweep / AC Sweep setup. Each part is turned so its pins
-  meet the imported wires; remaining misaligned pins get a short wire; an import report lists every adjustment,
-  unsupported part (e.g. transistors, op-amps) and setting that could not be read.
-## 0.5.0 — 2026-10-11 (works on Vercel / any static host)
-- Fix: production deployments showed "Simulation service unreachable: Unexpected token '<'". The native
-  /api/simulate service only exists in the Vite dev server. Production now runs **ngspice compiled to
-  WebAssembly** (npm eecircuit-engine 1.8.0, MIT) in a Web Worker inside the visitor's browser — no server.
-- Automatic backend choice: native local service when present (npm run dev with ngspice installed), otherwise
-  WebAssembly; ?engine=wasm|native forces one. Falls back to WebAssembly if the native service disappears.
-- Clear errors: HTML/empty/non-JSON replies from a missing service are reported as such, never as JSON parse errors.
-- WebAssembly specifics handled: one pass per analysis (engine returns one plot), ASCII-only decks (non-ASCII hangs
-  the WASM build), per-pass log reset (rolling 2 MB log), fresh instance after a timeout, 120 s cap, cancel = kill worker.
-- The whole test suite runs on both backends: npm test (native) and npm run test:wasm (WebAssembly).
-- vercel.json: Vite framework, dist output, immutable caching of hashed assets.
-## 0.4.4 — 2026-10-11
-- One snapping rule (src/core/snapping.ts) for the wire, net-alias, junction and marker tools, used for both the
-  live preview and the click, so the preview always shows exactly where the click lands. Reach is 14 screen pixels
-  at every zoom, measured to the wire itself; pins, wire ends and crossings are preferred when in reach.
-- Wire tool: a click near a pin or wire connects to it (and finishes the wire); junction tool snaps to crossings.
-- Selection hit areas use screen pixels at every zoom. Markers and aliases on a moved wire move with it;
-  a voltage marker that no longer sits on a net is drawn grey.
+## 0.5.1 — 2026-11-25 (Production audit, split-WASM streaming, AC branch currents, security & diagnostics)
+- **Split `.wasm` binary & streaming compilation (`vite.config.ts`, `src/sim/wasmCore.ts`):** Extracted the 5.10 MB ngspice-46 WASM binary into a standalone content-hashed `dist/assets/ngspice-46-<hash>.wasm` asset loaded lazily via `WebAssembly.compileStreaming(fetch(wasmUrl))`, shrinking the worker JS from 7.19 MB to 64.25 kB (−99.1%), reducing compressed transfer by 26% gzip (2.36 MB → 1.74 MB) / 28.5% brotli (1.65 MB → 1.18 MB), and eliminating browser base64 decoding overhead and Rollup `module` externalization warnings.
+- **Resolved AC branch-current limitation (`src/sim/deckBuilder.ts`):** Instrumented top-level `R/C/D/G/F/S/I` devices during AC passes with ideal `0 V` DC sensing sources and aliased native AC inductor currents `i(l*)` → `i(@l*[i])`, restoring exact complex magnitude, phase, and SPICE sign-convention currents (`I(R1)`, `I(C1)`, `I(L1)`, `I(D1)`, `W(R1)`, etc.) in AC analysis (verified to ≤ 3.3e-18 vs native ngspice-47, including nonlinear biased diode small-signal models).
+- **Security & reliability hardening:** Fixed `src/core/serialize.ts` crashes on `props: null`/`[]`, added 10 MB project cap, prototype-pollution-safe JSON reviver, finite coordinate/view validation; enforced netlist size (1 MB / 50k lines), DC/AC sweep point bounds (250k pts), log cap (512 KB), and rawfile cap (64 MB); fixed queued `AbortSignal` requests to cancel immediately without waiting on an active run; broadened `vercel.json` SPA rewrite exclusion to all file extensions.
+- **Lightweight production diagnostics:** Added local-only `getEngineDiagnostics()` (engine version, init state, WASM compile time, run duration, restart count, WebAssembly/Worker/Streaming capability flags) displayed unobtrusively in `Simulation Output` and `About` dialogs.
+- **Audit & stress testing (`tests/production-audit.test.ts`):** Added 10 new automated tests (18 suites, 170 tests total), verified 500–750 consecutive runs in Chrome with flat RSS plateau, 100/500/1000-component scaling, 4x CPU + Fast 3G throttling, immutable reload caching, all 9 schematic + 8 netlist GUI examples, and Firefox 150 split-WASM streaming.
+## 0.5.0 — 2026-11-25 (Client-side WebAssembly simulation & Vercel deployment)
+- Migrated simulation engine from local native `ngspice` + Vite dev middleware (`/api/simulate`) to genuine **ngspice-46** compiled to WebAssembly (`@o.z/ngspice-wasm@0.0.0`, BSD-3-Clause) running inside a dedicated ES module Web Worker (`src/sim/ngspiceWorker.ts` + `src/sim/wasmCore.ts` + `src/sim/wasmEngine.ts`).
+- Removed `/api/simulate` Vite server middleware (`server/ngspicePlugin.ts`) and HTTP engine (`src/sim/httpEngine.ts`) so dev, preview, and Vercel static production builds work identically with zero backend server and zero native binary dependencies.
+- Extracted shared deck validation, `.control` wrapping, two-pass AC handling, and ngspice error classification into pure TypeScript `src/sim/deckBuilder.ts`.
+- Added lazy WASM compilation caching (`WebAssembly.Module`), clean per-pass MEMFS isolation (preventing `.option interp`, `.temp`, `.param`, and stale rawfile leaks), zero-copy `Float64Array` worker transfer, stale-request filtering, 30 s timeout / `AbortSignal` cancellation via worker termination, and automatic worker crash/OOM recovery.
+- Added `vercel.json`, `DEPLOYMENT.md`, `THIRD_PARTY_LICENSES.md`, `"preview": "vite preview"` script, and comprehensive accuracy/recovery suite (`tests/wasm-accuracy.test.ts`).
+- Retained optional Node-only `server/ngspiceRunner.ts` and `src/sim/nodeEngine.ts` strictly for automated WASM-vs-native numerical accuracy cross-checking.
 ## 0.4.3 — 2026-10-11
 - New BUBBLE part (Part Browser, left toolbar): a named connector; every BUBBLE / net alias with the same LABEL
   is one net ("0" = ground), so circuits can be connected without wires. Unlabelled or unattached bubbles are reported.

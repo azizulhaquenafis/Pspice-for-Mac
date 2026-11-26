@@ -10,7 +10,6 @@
 | Editor | Junction dots (T / 3+ connections); crossing wires stay separate; explicit junction tool | ✅ (Test G) |
 | Editor | Net alias labels (double-click wire), text annotations | ✅ |
 | Editor | Select, shift-select, rubber-band, move with rubber-banding wires, delete | ✅ |
-| Editor | Copy/Cut/Paste incl. junctions and markers (current/power markers follow their part) | ✅ (review B05 test) |
 | Editor | Undo/redo all edits; cut/copy/paste | ✅ |
 | Editor | Net highlight on wire click | ✅ |
 | Editor | Zoom in/out/fit/selection/page, wheel pan, pinch/ctrl-wheel zoom | ✅ |
@@ -34,7 +33,6 @@
 | Netlist Mode | Whole-app mode switch (button, Ctrl+1/2), own menus/toolbar/status, SPICE highlighting, find/replace, undo/redo, Messages/Log, bias listing | ✅ |
 | Netlist Mode | PSpice Sw_tOpen/Sw_tClose X-instances (PARAMS: tOpen/tClose, ttran, Rclosed, Ropen); .PROBE signals → Probe traces | ✅ (tran-step tests) |
 | Sim | TMAX omitted/0 = automatic, invalid rejected, per-run and across-sweep workload limits with suggestions, output interpolation | ✅ (tran-step tests) |
-| Sim | Print Step auto-fix (0, > Final Time, absurdly fine, or over the sweep output budget → 1-2-5 value, with a note) | ✅ (tran-step tests, real ngspice) |
 | Netlist Mode | .STEP PARAM/TEMP (independent runs), .MEAS results, .SAVE, error line mapping, 8 examples, .cir/.sp/.spice/.net/.txt | ✅ (netlist-mode tests) |
 | Netlist Mode | Generated / edited / independent provenance; netlist saved inside .osch | ✅ |
 | Netlist Mode | .LIB/.INC files, .FOUR, .TF, .SENS, .NOISE, .STEP of sources/models | ⛔ (reported as errors) |
@@ -51,8 +49,9 @@
 | Netlist editor | .LIB/.INC files, .STEP, .FOUR, .MEAS, .TF, .SENS, .NOISE | ⛔ (reported as errors) |
 | Netlist | View generated + last simulated deck, Open in Netlist Editor, Probe ▸ Netlist button | ✅ |
 | Sim | DC sweep (linear, V/I source) | ✅ (Test E) |
-| Sim | AC sweep (lin/oct/dec) | ✅ (Test F) — R/C/D branch currents unavailable in AC (ngspice limitation workaround) |
-| Sim | Cancel simulation, 30 s timeout | ✅ (untested in automated suite) |
+| Sim | Client-side ngspice-46 WebAssembly in Web Worker (split `.wasm` streaming, static Vercel deploy, no backend) | ✅ (Chrome/Firefox + 170 automated tests) |
+| Sim | AC sweep (lin/oct/dec) with exact R/C/L/D/G/F/S/I/V/E/H complex branch currents | ✅ (Test F + AC branch-current tests vs native) |
+| Sim | Cancel simulation (queued + in-flight), 30 s timeout, worker crash recovery, lightweight diagnostics | ✅ (automated + GUI tests) |
 | Sim | Parametric, temperature, sensitivity, TF, noise, Fourier, Monte Carlo, nested sweep | ⛔ |
 | Probe | Traces from V/I markers, Add Trace, legend/visibility, auto-fit, drag-zoom, hover X/Y | ✅ |
 | Probe | AC dB / magnitude / phase, log frequency axis | ✅ |
@@ -62,21 +61,5 @@
 | Files | Save/Save As/Open .osch (File System Access API in Chrome; download fallback) | ✅ (Test I) |
 | Files | Autosave to browser storage + recovery prompt | 🟡 |
 | Files | Print (browser print of schematic) | 🟡 |
-| Files | PSpice Schematics .sch import (page 1; library parts R C L V/I sources E F G H D1N4148 switches PARAM BUBBLE grounds; analysis setup) | 🟡 tested on a hand-made 9.1-format file only — real course files still to be verified |
-| Files | OrCAD Capture .dsn/.opj import, multi-page .sch, transistor/op-amp parts | ⛔ |
+| Files | PSpice .sch / OrCAD import, SPICE deck import | ⛔ |
 | Desktop | Tauri macOS app | ⛔ (M4) |
-| Parts | VAC (DC + AC magnitude/phase; no transient sine) | ✅ (devices tests: RC low-pass vs 1/(1+jf/fc), fc 159.15 Hz) |
-| Parts | VPULSE (V1 V2 TD TR TF PW PER; timing validation) | ✅ (devices tests: waveform, RC charge/discharge) |
-| Parts | D1N4001, ZENER (DZ5V1), Dbreak with editable .model; D1N4148 (fixed) | ✅ (forward/reverse, I–V sweep, half-wave, regulator) |
-| Parts | QNPN / QPNP (C B E), editable Gummel-Poon subset | ✅ (CE amplifier bias + gain, cutoff/saturation/switching, PNP bias) |
-| Parts | MbreakN / MbreakP four-terminal LEVEL=1 (W L AD AS PD PS) | ✅ (square law, triode, body effect, CS amp, PMOS switch, CMOS inverter) |
-| Parts | Import .model card, Reset to Default, hide ref/value text | ✅ (devices tests + GUI-checked) |
-| Parts | Model parameters as {parameters} in parametric sweeps (fresh card per run) | ✅ (W, VTO, ACMAG, V2 sweeps) |
-| Probe | Transistor terminal currents I(Q:C/B/E), I(M:D/G/S/B), IC() IB() IE() ID() IG() IS(), W(Q) | ✅ (KCL checks; PMOS sign corrected) |
-| Probe | Device currents in AC sweep | ⛔ not yet available (ngspice saves no device currents in AC; reported as unavailable) |
-| Editor | Part Browser categories, aliases, fitted preview | ✅ (GUI-checked) |
-| Import | Transistors/diodes from .sch files | 🟡 names resolve via aliases; pin alignment untested without a reference file |
-| Sim | DC Sweep: Global Parameter, Temperature; Linear / Octave / Decade / Value List | ✅ (max-power tests: W(RL) = V²RL/(RS+RL)² at every point) |
-| Sim | DC Sweep: Model Parameter, Nested Sweep | ⛔ not yet available |
-| Sim | Parametric / .STEP with only the bias point → "Bias point vs parameter" curve in Probe | ✅ (max-power tests, GUI-checked) |
-| Netlist | .DC PARAM (LIN/DEC/OCT/LIST), .DC LIN source | ✅ (max-power tests) |

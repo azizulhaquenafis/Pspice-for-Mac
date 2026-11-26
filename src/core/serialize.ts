@@ -3,61 +3,79 @@ import { SchematicDoc, defaultProfile } from './model';
 import { PART_MAP } from './library';
 
 export const FILE_EXT = '.osch';
+export const MAX_PROJECT_BYTES = 10_000_000; // 10 MB safety limit for imported .osch files
+
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function safeJsonParse(text: string): unknown {
+  return JSON.parse(text, (key, value) => (FORBIDDEN_KEYS.has(key) ? undefined : value));
+}
 
 export function serialize(doc: SchematicDoc): string {
   return JSON.stringify(doc, null, 2);
 }
 
 export function deserialize(text: string): SchematicDoc {
+  if (typeof text !== 'string' || text.length > MAX_PROJECT_BYTES) {
+    throw new Error(`Project file exceeds maximum size (${MAX_PROJECT_BYTES / 1_000_000} MB)`);
+  }
   let d: any;
-  try { d = JSON.parse(text); } catch { throw new Error('File is not valid JSON'); }
-  if (d?.format !== 'openspice-schematic') throw new Error('Not an OpenSpice schematic file');
+  try {
+    d = safeJsonParse(text);
+  } catch {
+    throw new Error('File is not valid JSON');
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) throw new Error('Invalid project file');
+  if (d.format !== 'openspice-schematic') throw new Error('Not an OpenSpice schematic file');
   if (d.version !== 1) throw new Error(`Unsupported file version ${d.version}`);
-  for (const k of ['parts', 'wires', 'junctions', 'labels', 'markers']) if (!Array.isArray(d[k])) throw new Error(`Missing "${k}"`);
-  // Validate everything before the caller replaces the open document (B10).
-  const isNum = (v: unknown) => typeof v === 'number' && isFinite(v);
-  const isId = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length < 200;
-  const isPt = (o: any) => o && isNum(o.x) && isNum(o.y);
-  const ids = new Set<string>();
-  const uniq = (id: string, what: string) => { if (ids.has(id)) throw new Error(`Duplicate id "${id}" (${what})`); ids.add(id); };
+  for (const k of ['parts', 'wires', 'junctions', 'labels', 'markers']) {
+    if (!Array.isArray(d[k])) throw new Error(`Missing "${k}"`);
+  }
+  const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   for (const p of d.parts) {
-    if (!p || typeof p !== 'object') throw new Error('Invalid part entry');
+    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('Invalid part entry');
     if (!PART_MAP[p.type]) throw new Error(`Unknown part type "${p.type}"`);
-    if (!isId(p.id)) throw new Error(`Part ${p.ref ?? '?'} has no valid id`);
-    uniq(p.id, 'part');
-    if (typeof p.ref !== 'string') throw new Error(`Invalid reference on a ${p.type} part`);
     if (![0, 1, 2, 3].includes(p.rot)) throw new Error(`Invalid rotation on ${p.ref}`);
-    if (typeof p.mirror !== 'boolean') throw new Error(`Invalid mirror flag on ${p.ref}`);
-    if (!isPt(p)) throw new Error(`Invalid position on ${p.ref}`);
-    if (!p.props || typeof p.props !== 'object' || Array.isArray(p.props)) throw new Error(`Invalid properties on ${p.ref}`);
-    for (const [k, v] of Object.entries(p.props)) {
-      if (typeof v === 'number' && isFinite(v)) p.props[k] = String(v);          // tolerate numbers from hand-edited files
-      else if (typeof v !== 'string') throw new Error(`Invalid value for ${p.ref} ${k}`);
+    if (!isNum(p.x) || !isNum(p.y)) throw new Error(`Invalid coordinates on ${p.ref}`);
+    if (!p.props || typeof p.props !== 'object' || Array.isArray(p.props)) {
+      throw new Error(`Invalid properties on ${p.ref}`);
     }
-    for (const k of ['refOff', 'valOff']) if (p[k] !== undefined && !isPt(p[k])) throw new Error(`Invalid ${k} on ${p.ref}`);
-    if (p.hide !== undefined && !(p.hide && typeof p.hide === 'object' && Object.values(p.hide).every(v => typeof v === 'boolean'))) throw new Error(`Invalid display flags on ${p.ref}`);
   }
-  for (const w of d.wires) { if (!isId(w?.id) || !isPt(w.a) || !isPt(w.b)) throw new Error('Invalid wire geometry'); uniq(w.id, 'wire'); }
-  for (const j of d.junctions) { if (!isId(j?.id) || !isPt(j)) throw new Error('Invalid junction'); uniq(j.id, 'junction'); }
+  for (const w of d.wires) {
+    if (!w || typeof w !== 'object' || ![w.a?.x, w.a?.y, w.b?.x, w.b?.y].every(isNum)) {
+      throw new Error('Invalid wire geometry');
+    }
+  }
+  for (const j of d.junctions) {
+    if (!j || typeof j !== 'object' || !isNum(j.x) || !isNum(j.y)) {
+      throw new Error('Invalid junction geometry');
+    }
+  }
   for (const l of d.labels) {
-    if (!isId(l?.id) || !isPt(l) || typeof l.text !== 'string' || !['alias', 'text'].includes(l.kind)) throw new Error('Invalid label');
-    if (l.off !== undefined && !isPt(l.off)) throw new Error('Invalid label offset');
-    uniq(l.id, 'label');
+    if (!l || typeof l !== 'object' || !isNum(l.x) || !isNum(l.y) || typeof l.text !== 'string') {
+      throw new Error('Invalid label entry');
+    }
   }
-  const partIds = new Set(d.parts.map((p: any) => p.id));
   for (const m of d.markers) {
-    if (!isId(m?.id) || !isPt(m) || !['V', 'I', 'VD', 'W'].includes(m.kind)) throw new Error('Invalid marker');
-    if (m.kind === 'VD' && !(isNum(m.x2) && isNum(m.y2))) throw new Error('Invalid differential marker');
-    if ((m.kind === 'I' || m.kind === 'W') && !partIds.has(m.partId)) throw new Error('A current/power marker refers to a missing part');
-    uniq(m.id, 'marker');
+    if (!m || typeof m !== 'object' || !isNum(m.x) || !isNum(m.y) || !['V', 'I', 'VD', 'W'].includes(m.kind)) {
+      throw new Error('Invalid marker entry');
+    }
   }
-  if (d.view !== undefined && !(d.view && isNum(d.view.x) && isNum(d.view.y) && isNum(d.view.zoom) && d.view.zoom > 0)) throw new Error('Invalid view');
-  if (d.profile !== undefined && (d.profile === null || typeof d.profile !== 'object')) throw new Error('Invalid simulation profile');
-  if (d.biasOff !== undefined && (typeof d.biasOff !== 'object' || d.biasOff === null || !Object.values(d.biasOff).every(isPt))) throw new Error('Invalid bias label offsets');
-  if (d.probeTraces !== undefined && !(Array.isArray(d.probeTraces) && d.probeTraces.every((t: unknown) => typeof t === 'string'))) throw new Error('Invalid probe traces');
-  if (d.netlist !== undefined && !(d.netlist && typeof d.netlist.text === 'string')) throw new Error('Invalid netlist document');
   const prof = defaultProfile();
-  d.profile = { ...prof, ...d.profile, tran: { ...prof.tran, ...d.profile?.tran }, dc: { ...prof.dc, ...d.profile?.dc }, ac: { ...prof.ac, ...d.profile?.ac }, param: { ...prof.param, ...d.profile?.param } };
-  d.view = d.view ?? { x: -50, y: -50, zoom: 1.5 };
+  const rawProf = d.profile && typeof d.profile === 'object' && !Array.isArray(d.profile) ? d.profile : {};
+  d.profile = {
+    ...prof,
+    ...rawProf,
+    tran: { ...prof.tran, ...(rawProf.tran && typeof rawProf.tran === 'object' ? rawProf.tran : {}) },
+    dc: { ...prof.dc, ...(rawProf.dc && typeof rawProf.dc === 'object' ? rawProf.dc : {}) },
+    ac: { ...prof.ac, ...(rawProf.ac && typeof rawProf.ac === 'object' ? rawProf.ac : {}) },
+    param: { ...prof.param, ...(rawProf.param && typeof rawProf.param === 'object' ? rawProf.param : {}) },
+  };
+  const v = d.view;
+  d.view =
+    v && typeof v === 'object' && isNum(v.x) && isNum(v.y) && isNum(v.zoom) && v.zoom > 0
+      ? { x: v.x, y: v.y, zoom: Math.min(8, Math.max(0.2, v.zoom)) }
+      : { x: -50, y: -50, zoom: 1.5 };
+  if (typeof d.title !== 'string') d.title = 'Untitled';
   return d as SchematicDoc;
 }

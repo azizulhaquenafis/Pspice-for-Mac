@@ -4,8 +4,7 @@ import { SchematicDoc } from '../core/model';
 import { Plot, getVector } from '../sim/types';
 import { extractConnectivity } from '../core/connectivity';
 import { currentVector, spiceNameFor } from '../core/netlist';
-import { getDef } from '../core/library';
-import { Device, deviceCurrentVec, evaluateExpr, TERMINALS } from '../sim/expr';
+import { Device, deviceCurrentVec, evaluateExpr } from '../sim/expr';
 
 export const TRACE_COLORS = ['#00a000', '#e00000', '#0000e0', '#c0a000', '#c000c0', '#00a0a0', '#808080', '#ff8000'];
 export const traceColor = (i: number) => TRACE_COLORS[i % TRACE_COLORS.length];
@@ -28,12 +27,7 @@ export function markerExprs(doc: SchematicDoc): (string | null)[] {
     if (m.kind === 'W') return `W(${p.ref})`;
     if (!m.pin) return null;
     const cv = currentVector(p, m.pin, spiceNameFor(p));
-    if (!cv) return null;
-    // F/H control pins keep their identity (control current), not the output current I(F1)
-    if (m.pin === 'C+' || m.pin === 'C-') return `I(${p.ref}:${m.pin})`;
-    // BJT / MOSFET: the current into the marked terminal (its own ngspice vector)
-    if (TERMINALS[getDef(p.type).spiceLetter.toLowerCase()]) return `I(${spiceNameFor(p)}:${m.pin})`;
-    return `${cv.sign < 0 ? '-' : ''}I(${p.ref})`;
+    return cv ? `${cv.sign < 0 ? '-' : ''}I(${p.ref})` : null;
   });
 }
 
@@ -47,14 +41,6 @@ export function availableTraces(plot: Plot, devices: Map<string, Device>): Trace
     if (m && !m[1].includes('__')) volts.push(`V(${m[1].toUpperCase()})`);
   }
   for (const d of devices.values()) {
-    const term = TERMINALS[d.name[0].toLowerCase()];
-    if (term) {
-      // terminal currents (into each terminal) and terminal voltages of BJTs / MOSFETs
-      const have = term.filter(t => getVector(plot, `i(@${d.name.toLowerCase()}[i${t}])`));
-      have.forEach(t => currents.push(`I(${d.name}:${t.toUpperCase()})`));
-      if (have.length === term.length) power.push(`W(${d.name})`);
-      continue;
-    }
     const cv = deviceCurrentVec(d.name);
     const hasI = !!(cv && getVector(plot, cv));
     if (hasI) currents.push(`I(${d.name})`);
@@ -65,7 +51,7 @@ export function availableTraces(plot: Plot, devices: Map<string, Device>): Trace
   const sort = (a: string[]) => [...new Set(a)].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
   return [
     { title: 'Node voltages', items: sort(volts) },
-    { title: 'Currents (into pin 1 / + ; Q/M: into the named terminal)', items: sort(currents) },
+    { title: 'Currents (into pin 1 / +)', items: sort(currents) },
     { title: 'Voltage across parts (pin 1 − pin 2)', items: sort(across) },
     { title: 'Power absorbed W = V·I', items: sort(power) },
   ];
@@ -83,43 +69,16 @@ export function evalForDisplay(plot: Plot, expr: string, devices: Map<string, De
   return { y, label: mode === 'db' ? `DB(${expr})` : mode === 'phase' ? `P(${expr})` : `M(${expr})` };
 }
 
-/** deck: the simulated netlist; for a DC sweep its .dc line names the swept source (ngspice calls the
- *  sweep vector just "v-sweep"/"i-sweep"), labelled like PSpice: V_VIN. */
-export function xAxis(plot: Plot, deck = ''): { x: Float64Array; label: string; log: boolean; unit: string } {
+export function xAxis(plot: Plot): { x: Float64Array; label: string; log: boolean } {
   const v = plot.vectors[0];
-  const src = /^\s*\.dc\s+(\S+)/im.exec(deck)?.[1];
-  const srcKind = !src ? 'v' : /^temp$/i.test(src) ? 't' : src[0].toLowerCase();
-  const dcLabel = plot.xLabel ?? (!src ? `${v.name.replace(/^v\((.*)-sweep\)$/i, '$1').toUpperCase()} sweep`
-    : srcKind === 't' ? 'TEMP' : srcKind === 'r' ? src.toUpperCase() : `${srcKind === 'i' ? 'I' : 'V'}_${src.toUpperCase()}`);
-  const unit = plot.xUnit ?? (plot.kind === 'tran' ? 's' : plot.kind === 'ac' ? 'Hz' : plot.kind === 'dc'
-    ? ({ t: '°C', r: 'Ω', i: 'A' } as Record<string, string>)[srcKind] ?? 'V' : '');
-  const label = plot.kind === 'tran' ? 'Time (s)' : plot.kind === 'ac' ? 'Frequency (Hz)' : plot.kind === 'dc' ? dcLabel : v.name;
+  const label = plot.kind === 'tran' ? 'Time (s)' : plot.kind === 'ac' ? 'Frequency (Hz)' : plot.kind === 'dc' ? `${v.name.replace(/^v\((.*)-sweep\)$/i, '$1').toUpperCase()} sweep` : v.name;
   const x = v.re;
-  return { x, label, unit, log: (plot.kind === 'ac' || plot.kind === 'dc') && x.length > 2 && x[0] > 0 && Math.abs((x[2] / x[1]) - (x[1] / x[0])) < 1e-6 * (x[1] / x[0]) && x[1] / x[0] > 1.0001 };
+  return { x, label, log: plot.kind === 'ac' && x.length > 2 && x[0] > 0 && Math.abs((x[2] / x[1]) - (x[1] / x[0])) < 1e-6 * (x[1] / x[0]) && x[1] / x[0] > 1.0001 };
 }
 
 export function toCSV(x: Float64Array, xLabel: string, traces: { label: string; y: Float64Array }[]): string {
   const q = (s: string) => (/[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const rows = [[xLabel, ...traces.map(t => t.label)].map(q).join(',')];
   for (let i = 0; i < x.length; i++) rows.push([x[i], ...traces.map(t => t.y[i])].map(v => v.toPrecision(10)).join(','));
-  return rows.join('\n') + '\n';
-}
-
-/** CSV of the visible traces. One shared x column only when every trace has the very same x data;
- *  otherwise (parametric runs with different time points) an x/y column pair per trace (B14). */
-export function tracesCSV(xLabel: string, visible: { label: string; x: Float64Array; y: Float64Array }[]): string {
-  if (!visible.length) return '';
-  const x0 = visible[0].x;
-  const shared = visible.every(t => t.x === x0 || (t.x.length === x0.length && t.x.every((v, i) => v === x0[i])));
-  const q = (s: string) => (/[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const rows: string[] = [];
-  if (shared) {
-    rows.push([xLabel, ...visible.map(t => t.label)].map(q).join(','));
-    for (let i = 0; i < x0.length; i++) rows.push([x0[i], ...visible.map(t => t.y[i])].map(v => v.toPrecision(12)).join(','));
-  } else {
-    rows.push(visible.flatMap(t => [`${xLabel} [${t.label}]`, t.label]).map(q).join(','));
-    const n = Math.max(...visible.map(t => t.x.length));
-    for (let i = 0; i < n; i++) rows.push(visible.flatMap(t => i < t.x.length ? [t.x[i].toPrecision(12), t.y[i].toPrecision(12)] : ['', '']).join(','));
-  }
   return rows.join('\n') + '\n';
 }

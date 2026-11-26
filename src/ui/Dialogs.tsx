@@ -1,12 +1,12 @@
 import { useState, ReactNode, useMemo } from 'react';
 import { useStore } from '../state/store';
-import { LIBRARY, getDef, CATEGORIES, matchesPart, findDef, defaultProps, PartDef, PropDef } from '../core/library';
+import { LIBRARY, getDef } from '../core/library';
 import { SymbolBody } from './Symbol';
 import { parseSpiceNumber, formatEng } from '../core/units';
 import { isBraced, unbrace, tokenize } from '../core/params';
-import { currentVector, modelParams } from '../core/netlist';
+import { currentVector } from '../core/netlist';
 import { newId, SimProfile } from '../core/model';
-import { createNetlist, download, simulate, schematicToNetlistEditor } from '../state/actions';
+import { createNetlist, download, simulate, schematicToNetlistEditor, getEngineDiagnostics } from '../state/actions';
 
 export function Dialog({ title, children, onClose, width = 360, buttons }: { title: string; children: ReactNode; onClose: () => void; width?: number; buttons?: ReactNode }) {
   return (
@@ -26,64 +26,31 @@ const close = () => useStore.getState().setDialog(null);
 export function PartBrowser() {
   const [q, setQ] = useState('');
   const [selName, setSelName] = useState('R');
-  const list = useMemo(() => LIBRARY.filter(d => matchesPart(d, q)), [q]);
-  const groups = CATEGORIES.map(c => ({ c, parts: list.filter(d => d.category === c) })).filter(g => g.parts.length);
+  const list = useMemo(() => LIBRARY.filter(d => (d.name + ' ' + d.description).toLowerCase().includes(q.toLowerCase())), [q]);
   const def = getDef(list.find(d => d.name === selName)?.name ?? list[0]?.name ?? 'R');
   const place = (name = def.name) => { useStore.getState().setTool({ kind: 'place', partType: name, rot: 0, mirror: false }); close(); };
-  // preview box fitted to the symbol (pins + body), so transistors and sources are centred alike
-  const xs = [...def.pins.map(p => p.x), ...(def.body ? [def.body[0], def.body[2]] : [0, 40])];
-  const ys = [...def.pins.map(p => p.y), ...(def.body ? [def.body[1], def.body[3]] : [-10, 10])];
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-  const span = Math.max(70, Math.max(...xs) - Math.min(...xs) + 36, (Math.max(...ys) - Math.min(...ys) + 36) * 1.1);
   return (
-    <Dialog title="Part Browser Basic" onClose={close} width={500} buttons={<>
+    <Dialog title="Part Browser Basic" onClose={close} width={460} buttons={<>
       <button className="default" onClick={() => place()}>Place &amp; Close</button><button onClick={close}>Close</button></>}>
-      <div className="row"><label>Part Name:</label><input autoFocus value={q} onChange={e => { setQ(e.target.value); const m = findDef(e.target.value); if (m) setSelName(m.name); }}
+      <div className="row"><label>Part Name:</label><input autoFocus value={q} onChange={e => { setQ(e.target.value); const m = LIBRARY.find(d => d.name.toLowerCase() === e.target.value.toLowerCase()); if (m) setSelName(m.name); }}
         onKeyDown={e => { if (e.key === 'Enter' && list.length) place(list.find(d => d.name === selName)?.name ?? list[0].name); }} /></div>
       <div className="row"><label>Description:</label><span className="desc">{def.description}</span></div>
       <div className="pb">
-        <div className="listbox" style={{ height: 260, width: 190 }}>
-          {groups.map(g => <div key={g.c}>
-            <div className="li-group">{g.c}</div>
-            {g.parts.map(d => <div key={d.name} className={`li${d.name === def.name ? ' on' : ''}`} onClick={() => setSelName(d.name)} onDoubleClick={() => place(d.name)}>{d.name}</div>)}
-          </div>)}
-          {!groups.length && <div className="li muted">No part matches</div>}
+        <div className="listbox" style={{ height: 220, width: 190 }}>
+          {list.map(d => <div key={d.name} className={`li${d.name === def.name ? ' on' : ''}`} onClick={() => setSelName(d.name)} onDoubleClick={() => place(d.name)}>{d.name}</div>)}
         </div>
         <div className="pb-preview">
-          <svg viewBox={`${cx - span / 2} ${cy - span * 0.45} ${span} ${span * 0.9}`} width={200} height={180} className="preview">
+          <svg viewBox="-30 -30 110 100" width={200} height={180} className="preview">
             <g className="part"><SymbolBody def={def} /></g>
-            {def.pins.map(p => <text key={p.name} x={p.x} y={p.y - 3} className="pin-name" textAnchor="middle">{def.pins.length > 1 ? p.name : ''}</text>)}
           </svg>
-          <div className="muted">Library: {def.category}<br />Pins: {def.pins.map(p => p.name).join(', ')}
-            {def.aliases?.length ? <><br />Also: {def.aliases.join(', ')}</> : null}
-            {def.modelType ? <><br />Model: {def.props.find(p => p.kind === 'model')?.default} ({def.modelType})</> : null}</div>
+          <div className="muted">Library: {def.category}<br />Pins: {def.pins.map(p => p.name).join(', ')}</div>
         </div>
       </div>
     </Dialog>
   );
 }
 
-/** Parse a pasted ".model NAME TYPE(params)" card into the part's MODEL / model fields (unknown → EXTRA). */
-export function importModelCard(def: PartDef, text: string): { props: Record<string, string> } | { error: string } {
-  const m = /^\s*\.model\s+(\S+)\s+([A-Za-z]+)\s*\(?([\s\S]*?)\)?\s*$/i.exec(text.replace(/\n\s*\+/g, ' ').trim());
-  if (!m) return { error: 'Expected: .model NAME TYPE(PARAM=value ...)' };
-  const type = m[2].toUpperCase();
-  if (type !== def.modelType) return { error: `This part needs a ${def.modelType} model; the card is ${type}` };
-  const props: Record<string, string> = {};
-  for (const pd of def.props) if (pd.model) props[pd.name] = '';
-  props.MODEL = m[1];
-  const extra: string[] = [];
-  for (const t of m[3].replace(/\s*=\s*/g, '=').split(/[\s,]+/).filter(Boolean)) {
-    const kv = /^([A-Za-z]\w*)=(.+)$/.exec(t);
-    if (!kv) return { error: `"${t}" is not PARAM=value` };
-    const pd = def.props.find(p => p.model && p.kind === 'num' && p.name.toUpperCase() === kv[1].toUpperCase());
-    if (pd) props[pd.name] = kv[2]; else extra.push(`${kv[1].toUpperCase()}=${kv[2]}`);
-  }
-  props.EXTRA = extra.join(' ');
-  return { props };
-}
-
-function NumField({ value, onChange, unit, optional, emptyHint = '(optional)' }: { value: string; onChange: (v: string) => void; unit?: string; optional?: boolean; emptyHint?: string }) {
+function NumField({ value, onChange, unit, optional }: { value: string; onChange: (v: string) => void; unit?: string; optional?: boolean }) {
   const braced = isBraced(value);
   let exprErr = '';
   if (braced) { try { tokenize(unbrace(value)); } catch (e) { exprErr = (e as Error).message; } }
@@ -92,79 +59,46 @@ function NumField({ value, onChange, unit, optional, emptyHint = '(optional)' }:
   return (
     <span className="numfield">
       <input className={bad ? 'bad' : ''} value={value} onChange={e => onChange(e.target.value)} />
-      <span className="hint">{braced ? (exprErr || 'parameter expression') : r ? (r.ok ? `= ${formatEng(r.value, 5)}${unit ?? ''}${r.warning ? ' ⚠ ' + r.warning : ''}` : r.error) : optional ? emptyHint : 'required'}</span>
+      <span className="hint">{braced ? (exprErr || 'parameter expression') : r ? (r.ok ? `= ${formatEng(r.value, 5)}${unit ?? ''}${r.warning ? ' ⚠ ' + r.warning : ''}` : r.error) : optional ? '(optional)' : 'required'}</span>
     </span>
   );
-}
-
-function propError(pd: PropDef, v: string): string | null {
-  v = v.trim();
-  if (!v) return pd.optional ? null : 'required';
-  if (pd.kind === 'num' && isBraced(v)) { try { tokenize(unbrace(v)); return null; } catch (e) { return (e as Error).message; } }
-  if (pd.kind === 'num') { const r = parseSpiceNumber(v); return r.ok ? null : r.error ?? 'invalid'; }
-  if (pd.kind === 'model') return /^[A-Za-z_][A-Za-z0-9_.\-]*$/.test(v) ? null : 'letters, digits, _ . - only';
-  if (pd.kind === 'raw') return modelParams(v, () => 1).errors[0] ?? null;
-  return null;
 }
 
 export function PropertiesDialog({ partId }: { partId: string }) {
   const part = useStore(s => s.doc.parts.find(p => p.id === partId));
   const [ref, setRef] = useState(part?.ref ?? '');
   const [props, setProps] = useState<Record<string, string>>({ ...(part?.props ?? {}) });
-  const [hide, setHide] = useState({ ref: !!part?.hide?.ref, val: !!part?.hide?.val });
-  const [imp, setImp] = useState<string | null>(null);
-  const [impErr, setImpErr] = useState('');
   if (!part) return null;
   const def = getDef(part.type);
-  const errs = def.props.filter(pd => propError(pd, props[pd.name] ?? ''));
+  const errs = def.props.filter(pd => {
+    const v = (props[pd.name] ?? '').trim();
+    if (!v) return !pd.optional;
+    if (pd.kind === 'num' && isBraced(v)) { try { tokenize(unbrace(v)); return false; } catch { return true; } }
+    return pd.kind === 'num' && !parseSpiceNumber(v).ok;
+  });
   const refBad = !def.isGround && !def.isParam && !def.isBubble && !/^[A-Za-z][A-Za-z0-9_]*$/.test(ref);
   const dup = useStore.getState().doc.parts.some(p => p.id !== partId && p.ref.toUpperCase() === ref.toUpperCase() && ref);
   const ok = () => {
     if (errs.length || refBad || dup) return;
-    const h = hide.ref || hide.val ? { ...(hide.ref ? { ref: true } : {}), ...(hide.val ? { val: true } : {}) } : undefined;
-    useStore.getState().commit(d => ({ ...d, parts: d.parts.map(p => p.id === partId ? { ...p, ref, props, hide: h } : p) }), `${ref} attributes changed`);
+    useStore.getState().commit(d => ({ ...d, parts: d.parts.map(p => p.id === partId ? { ...p, ref, props } : p) }), `${ref} attributes changed`);
     close();
   };
-  const doImport = () => {
-    const r = importModelCard(def, imp ?? '');
-    if ('error' in r) { setImpErr(r.error); return; }
-    setProps({ ...props, ...r.props }); setImp(null); setImpErr('');
-  };
-  const row = (pd: PropDef) => {
-    const err = propError(pd, props[pd.name] ?? '');
-    return (
-      <tr key={pd.name} title={pd.help}>
-        <td>{pd.name}{pd.help && <span className="muted"> ({pd.help})</span>}</td>
-        <td>{pd.kind === 'num'
-          ? <NumField value={props[pd.name] ?? ''} unit={pd.unit} optional={pd.optional} emptyHint={pd.model ? '(ngspice default)' : undefined} onChange={v => setProps({ ...props, [pd.name]: v })} />
-          : <span className="numfield"><input style={{ width: 220 }} className={err ? 'bad' : ''} value={props[pd.name] ?? ''} onChange={e => setProps({ ...props, [pd.name]: e.target.value })} />
-            {err && <span className="hint">{err}</span>}{!err && pd.model && pd.optional && !(props[pd.name] ?? '').trim() && <span className="hint">(ngspice default)</span>}</span>}</td>
-      </tr>
-    );
-  };
-  const inst = def.props.filter(pd => !pd.model && pd.kind !== 'model'), mdl = def.props.filter(pd => pd.model || pd.kind === 'model');
-  const annotated = !def.isGround && !def.isParam && !def.isBubble;
   return (
-    <Dialog title={`${part.type}  —  ${part.ref}`} onClose={close} width={def.modelType ? 540 : 460} buttons={<>
-      <button onClick={() => { setProps(defaultProps(def)); setHide({ ref: false, val: false }); }} title="Restore the library default values (reference kept)">Reset to Default</button>
+    <Dialog title={`${part.type}  —  ${part.ref}`} onClose={close} width={460} buttons={<>
       <button className="default" disabled={!!errs.length || refBad || dup} onClick={ok}>OK</button><button onClick={close}>Cancel</button></>}>
       <form onSubmit={e => { e.preventDefault(); ok(); }}>
         <table className="attr">
           <tbody>
-            {annotated && <tr><td>REFDES</td><td><input value={ref} className={refBad || dup ? 'bad' : ''} onChange={e => setRef(e.target.value)} />{dup && <span className="hint">duplicate</span>}</td></tr>}
-            {inst.map(row)}
-            {mdl.length > 0 && <tr><td colSpan={2} className="attr-group">Model card: .model {props.MODEL || '?'} {def.modelType}(...)
-              <button type="button" style={{ marginLeft: 8 }} onClick={() => setImp(imp === null ? '' : null)}>Import .model...</button></td></tr>}
-            {imp !== null && <tr><td colSpan={2}>
-              <textarea rows={3} style={{ width: '100%' }} placeholder={`.model NAME ${def.modelType}(IS=1e-14 ...)`} value={imp} onChange={e => setImp(e.target.value)} />
-              <div><button type="button" onClick={doImport}>Use this model</button> {impErr && <span className="hint bad-t">{impErr}</span>}
-                <span className="muted"> Paste a model you are allowed to use; it is stored with this part.</span></div>
-            </td></tr>}
-            {mdl.map(row)}
+            {!def.isGround && !def.isParam && !def.isBubble && <tr><td>REFDES</td><td><input value={ref} className={refBad || dup ? 'bad' : ''} onChange={e => setRef(e.target.value)} />{dup && <span className="hint">duplicate</span>}</td></tr>}
+            {def.props.map(pd => (
+              <tr key={pd.name} title={pd.help}>
+                <td>{pd.name}{pd.help && <span className="muted"> ({pd.help})</span>}</td>
+                <td>{pd.kind === 'num'
+                  ? <NumField value={props[pd.name] ?? ''} unit={pd.unit} optional={pd.optional} onChange={v => setProps({ ...props, [pd.name]: v })} />
+                  : <input style={{ width: 220 }} value={props[pd.name] ?? ''} onChange={e => setProps({ ...props, [pd.name]: e.target.value })} />}</td>
+              </tr>
+            ))}
             {def.props.length === 0 && <tr><td colSpan={2} className="muted">This part has no editable attributes.{def.models ? ' Model: ' + def.models[0].split(' ')[1] : ''}</td></tr>}
-            {annotated && <tr><td>Display</td><td>
-              <label className="chk"><input type="checkbox" checked={!hide.ref} onChange={e => setHide({ ...hide, ref: !e.target.checked })} />Reference</label>{' '}
-              <label className="chk"><input type="checkbox" checked={!hide.val} onChange={e => setHide({ ...hide, val: !e.target.checked })} />Value</label></td></tr>}
           </tbody>
         </table>
         <button type="submit" hidden />
@@ -331,41 +265,27 @@ export function TranDialog() {
 
 export function DcDialog() {
   const [v, setV, save] = useLocal('dc');
-  const vt = v.varType ?? 'source', sw = v.sweep ?? 'lin';
   const srcs = useStore(s => s.doc.parts.filter(p => ['V', 'I'].includes(getDef(p.type).spiceLetter)).map(p => p.ref));
-  const params = useStore(s => s.doc.parts.filter(p => getDef(p.type).isParam).flatMap(p => Object.entries(p.props).filter(([k, x]) => k.startsWith('NAME') && x.trim()).map(([, x]) => x.trim())));
-  const listOk = (v.values ?? '').split(/[\s,;]+/).filter(Boolean).every(t => parseSpiceNumber(t).ok) && !!(v.values ?? '').trim();
-  const valid = (vt === 'temp' || !!v.source.trim()) && (sw === 'list' ? listOk : isNum(v.start) && isNum(v.end) && isNum(v.incr));
-  const radio = (on: boolean, label: string, set: () => void) => <label className="chk"><input type="radio" checked={on} onChange={set} /> {label}</label>;
+  const valid = isNum(v.start) && isNum(v.end) && isNum(v.incr) && !!v.source.trim();
   return (
-    <Dialog title="DC Sweep" onClose={() => useStore.getState().setDialog('analysis')} width={440} buttons={<>
+    <Dialog title="DC Sweep" onClose={() => useStore.getState().setDialog('analysis')} width={420} buttons={<>
       <button className="default" disabled={!valid} onClick={() => save(valid)}>OK</button><button onClick={() => useStore.getState().setDialog('analysis')}>Cancel</button></>}>
       <div className="dc-grid">
         <fieldset><legend>Swept Var. Type</legend>
-          {radio(vt === 'source', 'Voltage/Current Source', () => setV({ ...v, varType: 'source', source: srcs.includes(v.source) ? v.source : srcs[0] ?? '' }))}
-          {radio(vt === 'temp', 'Temperature', () => setV({ ...v, varType: 'temp' }))}
-          <label className="chk na" title="not yet available"><input type="radio" disabled /> Model Parameter (not yet available)</label>
-          {radio(vt === 'global', 'Global Parameter', () => setV({ ...v, varType: 'global', source: params.find(n => n.toLowerCase() === v.source.toLowerCase()) ?? params[0] ?? '' }))}
+          <label className="chk"><input type="radio" checked readOnly /> Voltage/Current Source</label>
+          {['Temperature', 'Model Parameter', 'Global Parameter'].map(t => <label key={t} className="chk na"><input type="radio" disabled /> {t}</label>)}
         </fieldset>
         <fieldset><legend>Sweep Type</legend>
-          {radio(sw === 'lin', 'Linear', () => setV({ ...v, sweep: 'lin' }))}
-          {radio(sw === 'oct', 'Octave', () => setV({ ...v, sweep: 'oct' }))}
-          {radio(sw === 'dec', 'Decade', () => setV({ ...v, sweep: 'dec' }))}
-          {radio(sw === 'list', 'Value List', () => setV({ ...v, sweep: 'list' }))}
+          <label className="chk"><input type="radio" checked readOnly /> Linear</label>
+          {['Octave', 'Decade', 'Value List'].map(t => <label key={t} className="chk na"><input type="radio" disabled /> {t}</label>)}
         </fieldset>
       </div>
-      {vt !== 'temp' && <div className="row"><label>{vt === 'global' ? 'Param. Name:' : 'Name:'}</label><input list="dc-names" value={v.source} onChange={e => setV({ ...v, source: e.target.value })} />
-        <datalist id="dc-names">{(vt === 'global' ? params : srcs).map(x => <option key={x} value={x} />)}</datalist></div>}
-      {vt === 'global' && !params.length && <div className="row"><label /><span className="hint bad-t">Place a PARAMETERS block (part PARAM) and declare the parameter, e.g. RL = 1k, then use {'{RL}'} as a value.</span></div>}
-      {sw === 'list'
-        ? <Field label="Values:" value={v.values ?? ''} onChange={x => setV({ ...v, values: x })} />
-        : <>
-          <Field label="Start Value:" value={v.start} onChange={x => setV({ ...v, start: x })} />
-          <Field label="End Value:" value={v.end} onChange={x => setV({ ...v, end: x })} />
-          <Field label={sw === 'lin' ? 'Increment:' : `Points/${sw === 'dec' ? 'Decade' : 'Octave'}:`} value={v.incr} onChange={x => setV({ ...v, incr: x })} />
-        </>}
-      {(vt === 'global' || sw !== 'lin') && <div className="row"><label /><span className="muted">Runs one bias point per value (up to 500) and plots them against {vt === 'temp' ? 'TEMP' : v.source || 'the swept value'}.</span></div>}
-      <div className="row"><label /><button disabled title="Not yet available">Nested Sweep... (not yet available)</button></div>
+      <div className="row"><label>Name:</label><input list="dc-srcs" value={v.source} onChange={e => setV({ ...v, source: e.target.value })} />
+        <datalist id="dc-srcs">{srcs.map(s => <option key={s} value={s} />)}</datalist></div>
+      <Field label="Start Value:" value={v.start} onChange={x => setV({ ...v, start: x })} />
+      <Field label="End Value:" value={v.end} onChange={x => setV({ ...v, end: x })} />
+      <Field label="Increment:" value={v.incr} onChange={x => setV({ ...v, incr: x })} />
+      <div className="row"><label /><button disabled title="Not yet available">Nested Sweep...</button></div>
     </Dialog>
   );
 }
@@ -429,6 +349,7 @@ export function ErcDialog() {
 export function OutputDialog() {
   const r = useStore(s => s.sim.result);
   const [showLog, setShowLog] = useState(false);
+  const diag = getEngineDiagnostics();
   return (
     <Dialog title="Simulation Output" onClose={close} width={640} buttons={<>
       <button onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide' : 'Show'} ngspice log</button>
@@ -436,17 +357,29 @@ export function OutputDialog() {
       <button className="default" onClick={close}>Close</button></>}>
       {useStore.getState().sim.notes.length > 0 && <ul className="diags">{useStore.getState().sim.notes.map((n, i) => <li key={i} className="warning">Note: {n}</li>)}</ul>}
       {r?.errors.length ? <ul className="diags">{r.errors.map((e, i) => <li key={i} className="error">{e}</li>)}</ul> : <div className="ok-msg">Simulation completed.</div>}
-      {r && !r.ok && r.log && <div className="muted">Common causes: a node with no DC path to ground, a loop of voltage sources/inductors, or a zero-valued resistor.</div>}
-      {showLog && <pre className="netlist" style={{ maxHeight: 300 }}>{r?.log}</pre>}
+      {r && !r.ok && <div className="muted">Common causes: missing ground (node 0), a floating node with no DC path to ground, a loop of voltage sources/inductors, an undefined .model/.param, or a zero-valued resistor.</div>}
+      <div className="muted" style={{ marginTop: 6 }}>
+        Engine: {diag.ngspiceVersion} · State: {diag.state}
+        {diag.initMs !== null ? ` · WASM init: ${diag.initMs} ms` : ''}
+        {r ? ` · Run: ${r.elapsedMs.toFixed(0)} ms` : ''}
+      </div>
+      {showLog && <pre className="netlist" style={{ maxHeight: 300 }}>{r?.log || '(no engine log)'}</pre>}
     </Dialog>
   );
 }
 
 export function AboutDialog() {
+  const diag = getEngineDiagnostics();
   return (
-    <Dialog title="About OpenSpice Schematics" onClose={close} width={420} buttons={<button className="default" onClick={close}>OK</button>}>
-      <p><b>OpenSpice Schematics 0.1</b> — a schematic editor and Probe-style viewer inspired by the classic PSpice 9.1 Schematics workflow.</p>
-      <p>Simulation engine: ngspice (BSD-3-Clause), run locally. Not affiliated with Cadence/OrCAD/MicroSim. Results are computed by ngspice and may differ numerically from PSpice.</p>
+    <Dialog title="About OpenSpice Schematics" onClose={close} width={440} buttons={<button className="default" onClick={close}>OK</button>}>
+      <p><b>OpenSpice Schematics 0.5</b> — a schematic editor and Probe-style viewer inspired by the classic PSpice 9.1 Schematics workflow.</p>
+      <p>Simulation engine: {diag.ngspiceVersion} (BSD-3-Clause), running entirely client-side inside a browser Web Worker. Not affiliated with Cadence/OrCAD/MicroSim. Results are computed by ngspice and may differ numerically from PSpice.</p>
+      <p className="muted">
+        Diagnostics: state={diag.state}, runs={diag.totalRuns}, restarts={diag.workerRestarts}
+        {diag.initMs !== null ? `, init=${diag.initMs} ms` : ''}
+        {diag.lastRunMs !== null ? `, last=${diag.lastRunMs.toFixed(0)} ms` : ''}
+        {' · '}WASM={diag.browserSupport.webAssembly ? 'yes' : 'no'}, Worker={diag.browserSupport.webWorker ? 'yes' : 'no'}, Streaming={diag.browserSupport.streamingCompile ? 'yes' : 'no'}
+      </p>
     </Dialog>
   );
 }
@@ -465,15 +398,7 @@ export function PartInfoDialog({ partId }: { partId: string }) {
   const cv = def.pins.length >= 2 ? currentVector(p, def.pins[0].name, name) : null;
   const i = cv ? op?.vectors.find(x => x.name.toLowerCase() === cv.vec.toLowerCase())?.re[0] : undefined;
   const v1 = nodes[0] ? v(nodes[0].net) : undefined, v2 = nodes[1] ? v(nodes[1].net) : undefined;
-  const across = v1 !== undefined && v2 !== undefined && def.pins.length === 2 ? v1 - v2 : undefined;
-  // BJT / MOSFET: current into every terminal; power = Σ V(terminal)·I(into terminal)
-  const multi = 'QM'.includes(def.spiceLetter) && !!def.spiceLetter;
-  const term = multi ? nodes.map(n => {
-    const c = currentVector(p, n.pin, name);
-    const raw = c ? op?.vectors.find(x => x.name.toLowerCase() === c.vec.toLowerCase())?.re[0] : undefined;
-    return { pin: n.pin, i: raw === undefined ? undefined : raw * c!.sign, v: v(n.net) };
-  }) : [];
-  const termP = term.length && term.every(t => t.i !== undefined && t.v !== undefined) ? term.reduce((a, t) => a + t.i! * t.v!, 0) : undefined;
+  const across = v1 !== undefined && v2 !== undefined ? v1 - v2 : undefined;
   const unit = (pd?: { unit?: string }) => pd?.unit ?? '';
   return (
     <Dialog title={`Information — ${p.ref || p.type}`} onClose={close} width={460} buttons={<>
@@ -495,29 +420,12 @@ export function PartInfoDialog({ partId }: { partId: string }) {
             {op ? <>
               <div className="lh"><b>Bias point</b></div>
               {across !== undefined && def.pins.length === 2 && <div>Voltage across (pin {nodes[0].pin} − pin {nodes[1].pin}) = {formatEng(across, 6)}V</div>}
-              {!multi && i !== undefined && <div>Current into pin {def.pins[0].name} = {formatEng(i, 6)}A</div>}
-              {term.map(t => t.i !== undefined && <div key={t.pin}>Current into {t.pin} = {formatEng(t.i, 6)}A</div>)}
-              {termP !== undefined && <div>Power absorbed = {formatEng(termP, 6)}W</div>}
+              {i !== undefined && <div>Current into pin {def.pins[0].name} = {formatEng(i, 6)}A</div>}
               {i !== undefined && across !== undefined && <div>Power absorbed = {formatEng(i * across, 6)}W{i * across < 0 ? ' (delivering)' : ''}</div>}
             </> : <div className="muted">Run a simulation (F11) to see bias voltage, current and power.</div>}
           </div>
         </div>
       </div>
-    </Dialog>
-  );
-}
-
-export function ImportReportDialog() {
-  const r = useStore(s => s.importReport);
-  if (!r) return null;
-  return (
-    <Dialog title={`Import — ${r.file}`} onClose={close} width={560} buttons={<button className="default" onClick={close}>OK</button>}>
-      <ul className="diags">
-        {r.notes.map((n, i) => <li key={'n' + i}>{n}</li>)}
-        {r.warnings.map((w, i) => <li key={'w' + i} className="warning">{w}</li>)}
-      </ul>
-      <div className="muted">Check the circuit, then Analysis ▸ Simulate (F11). Save it as an OpenSpice project with File ▸ Save.
-        PSpice symbol libraries are not available, so OpenSpice symbols are aligned to the imported wires.</div>
     </Dialog>
   );
 }
